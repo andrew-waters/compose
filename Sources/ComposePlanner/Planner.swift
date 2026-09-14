@@ -401,18 +401,41 @@ public enum Planner {
     ) throws -> [String: NetworkAssignment] {
         var assignments: [String: NetworkAssignment] = [:]
         for name in order {
-            guard let service = file.services[name] else { continue }
-            guard let key = service.networks.first, let spec = file.networks[key] else {
-                assignments[name] = NetworkAssignment(name: project.defaultNetworkName, isExternal: false)
-                continue
+            guard let assignment = networkAssignment(for: name, in: file, project: project) else { continue }
+            if assignment.isExternal, !state.networks.contains(where: { $0.name == assignment.name }) {
+                throw PlanError.missingExternalNetwork(name: assignment.name, service: name)
             }
-            let resolved = spec.resolvedName(projectName: project.name)
-            if spec.isExternal, !state.networks.contains(where: { $0.name == resolved }) {
-                throw PlanError.missingExternalNetwork(name: resolved, service: name)
-            }
-            assignments[name] = NetworkAssignment(name: resolved, isExternal: spec.isExternal)
+            assignments[name] = assignment
         }
         return assignments
+    }
+
+    private static func networkAssignment(
+        for service: String,
+        in file: ComposeFile,
+        project: ProjectIdentity
+    ) -> NetworkAssignment? {
+        guard let service = file.services[service] else { return nil }
+        guard let key = service.networks.first, let spec = file.networks[key] else {
+            return NetworkAssignment(name: project.defaultNetworkName, isExternal: false)
+        }
+        return NetworkAssignment(
+            name: spec.resolvedName(projectName: project.name),
+            isExternal: spec.isExternal
+        )
+    }
+
+    /// The network each service joins, by service name.
+    ///
+    /// One network per service, because a container joins one. Exposed because a front end
+    /// showing a project has to name the same networks the plan will create, and working them
+    /// out a second time is how the two come to disagree.
+    public static func networkNames(in file: ComposeFile, project: ProjectIdentity) -> [String: String] {
+        var names: [String: String] = [:]
+        for name in file.services.keys {
+            names[name] = networkAssignment(for: name, in: file, project: project)?.name
+        }
+        return names
     }
 
     /// Every published port, checked against every other service and against everything already

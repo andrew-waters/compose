@@ -1,4 +1,15 @@
-# container-compose
+# Compose
+
+Container compose is built as a plugin for [apple/container runtime](https://github.com/apple/container) to bring Docker Compose ergonomics to Apple's container runtime.
+
+Unlike earlier community efforts, which tend to be standalone binaries, this is an actual _plugin_ which can be installed to hook into the `container` CLI and allows you to 
+use commands like:
+
+```
+container compose up
+container compose down
+```
+
 
 Compose-style orchestration for [Apple's container](https://github.com/apple/container):
 bring a set of services up and down from a single file, on the Linux-containers-as-VMs

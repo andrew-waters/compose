@@ -267,6 +267,40 @@ struct CreateOperationTests {
         #expect(Planner.processArguments(imageEntrypoint: nil, imageCmd: nil, command: []).isEmpty)
     }
 
+    @Test("The networks a plan will create are the ones a front end can name in advance")
+    func networkNames() throws {
+        let file = try Sample.file(
+            """
+            services:
+              web:
+                image: nginx
+              db:
+                image: postgres
+                networks: [backend]
+              shared:
+                image: alpine
+                networks: [outside]
+            networks:
+              backend: {}
+              outside:
+                external: true
+            """
+        )
+        let names = Planner.networkNames(in: file, project: Sample.project)
+        #expect(names["web"] == "shop_default")
+        #expect(names["db"] == "shop_backend")
+        // An external network keeps the name it already has, unprefixed.
+        #expect(names["shared"] == "outside")
+
+        // And they are the same names the plan actually uses.
+        let plan = try Planner.up(
+            file: file,
+            project: Sample.project,
+            state: CurrentState(networks: [NetworkState(name: "outside")])
+        )
+        #expect(Set(plan.createOperations.map(\.networkName)) == Set(names.values.compactMap { $0 }))
+    }
+
     @Test("An image reference is compared in the form the runtime keeps it in")
     func imageReferenceNormalisation() {
         #expect(Planner.normalisedImageReference("alpine") == "docker.io/library/alpine:latest")
