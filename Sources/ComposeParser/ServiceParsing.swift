@@ -48,6 +48,23 @@ extension FileParser {
                 service.resources = try parseDeploy(valueNode, service: name, path: "\(base).deploy")
             case "depends_on":
                 service.dependsOn = try parseDependsOn(valueNode, service: name, path: "\(base).depends_on")
+            case "restart":
+                // The only restart policy this stack has is the absence of one, so `no` is
+                // honoured exactly, by doing nothing. Reporting it would be reporting
+                // agreement, and would refuse a file the plugin can run perfectly.
+                let policy = try string(valueNode, path: "\(base).restart").lowercased()
+                if policy != "no", !policy.isEmpty {
+                    note(
+                        key: "restart",
+                        service: name,
+                        node: valueNode,
+                        support: .unsupported(
+                            severity: .behavioural,
+                            reason: "`\(policy)` needs a restart policy container does not have; "
+                                + "a container that exits stays exited"
+                        )
+                    )
+                }
             default:
                 if let support = KeySupportTable.service[key] {
                     note(key: key, service: name, node: valueNode, support: support)

@@ -93,6 +93,10 @@ public enum KeySupportTable {
         "networks": .supported,
         "deploy": .supported,
         "depends_on": .supported,
+        "pull_policy": .deferred(
+            severity: .cosmetic,
+            reason: "an image is pulled when it is not already here; `always` and `never` are not honoured"
+        ),
         "platform": .deferred(
             severity: .cosmetic,
             reason: "every container on this stack is linux/arm64 today"
@@ -109,6 +113,8 @@ public enum KeySupportTable {
             severity: .behavioural,
             reason: "a container cannot report health, so probes would have to be run here"
         ),
+        // Value-dependent, and handled in the parser rather than read from here: `restart: no`
+        // is what happens anyway, so only a policy that asks for more than nothing is reported.
         "restart": .unsupported(
             severity: .behavioural,
             reason: "container has no restart policy; a container that exits stays exited"

@@ -120,7 +120,8 @@ struct FindingTests {
         let restart = try #require(byKey["restart"]?.first)
         #expect(restart.service == "app")
         #expect(restart.severity == .behavioural)
-        #expect(restart.support == KeySupportTable.service["restart"])
+        // The reason names the policy asked for, since `no` is honoured and the rest are not.
+        #expect(restart.support.reason?.contains("`always`") == true)
         #expect(restart.mark?.line == 4)
         #expect(restart.message.contains("`restart` in service `app`"))
 
@@ -161,6 +162,56 @@ struct FindingTests {
         let finding = try #require(result.findings.first { $0.key == "volumes" })
         #expect(finding.severity == .behavioural)
         #expect(finding.message.contains("appdata"))
+    }
+
+    @Test("`restart: no` is honoured exactly, so it is not reported")
+    func restartNoIsHonoured() throws {
+        let honoured = try Fixture.parse(
+            """
+            services:
+              a:
+                image: nginx
+                restart: no
+              b:
+                image: nginx
+                restart: "no"
+            """
+        )
+        #expect(honoured.findings.isEmpty)
+
+        let refused = try Fixture.parse(
+            """
+            services:
+              a:
+                image: nginx
+                restart: always
+              b:
+                image: nginx
+                restart: unless-stopped
+            """
+        )
+        #expect(refused.blockingFindings.count == 2)
+        #expect(refused.findings.allSatisfy { $0.key == "restart" })
+        #expect(refused.findings.first?.message.contains("`always`") == true)
+    }
+
+    @Test("A real compose key this does not honour is not reported as a typo")
+    func knownKeysAreNotTypos() throws {
+        // `pull_policy` is a key the spec defines and this does not act on. Calling that a
+        // typo would send someone looking for a spelling mistake that is not there.
+        let result = try Fixture.parse(
+            """
+            services:
+              web:
+                image: nginx
+                pull_policy: never
+                not_a_key: 1
+            """
+        )
+        let pullPolicy = try #require(result.findings.first { $0.key == "pull_policy" })
+        #expect(pullPolicy.kind == .unhandledKey)
+        #expect(pullPolicy.severity == .cosmetic)
+        #expect(result.findings.first { $0.key == "not_a_key" }?.kind == .unknownKey)
     }
 
     @Test("`version` is obsolete, not fatal, and does not block")

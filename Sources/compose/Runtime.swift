@@ -164,6 +164,33 @@ enum Runtime {
         }
     }
 
+    /// Create the host directories a service binds that are not there yet, which is what
+    /// compose does and what a file writing `./data/public:/data` expects.
+    ///
+    /// Without this the runtime is handed a mount whose source does not exist and the failure
+    /// arrives much later, as a container that will not bootstrap with `errno 2`.
+    ///
+    /// - Returns: the paths that had to be created, for reporting.
+    @discardableResult
+    static func ensureBindSources(of operation: CreateOperation) throws -> [String] {
+        var created: [String] = []
+        for mount in operation.mounts where !FileManager.default.fileExists(atPath: mount.hostPath) {
+            do {
+                try FileManager.default.createDirectory(
+                    atPath: mount.hostPath,
+                    withIntermediateDirectories: true
+                )
+            } catch {
+                throw ComposeError(
+                    "`\(mount.hostPath)` is mounted at `\(mount.containerPath)` and does not "
+                        + "exist: \(error.localizedDescription)"
+                )
+            }
+            created.append(mount.hostPath)
+        }
+        return created
+    }
+
     /// The `container` CLI that ran this plugin.
     ///
     /// A plugin lives at `<root>/libexec/container-plugins/<name>/bin/<name>`, so the CLI is
@@ -181,6 +208,9 @@ enum Runtime {
     }
 
     private static func create(_ operation: CreateOperation) async throws {
+        for path in try ensureBindSources(of: operation) {
+            Output.note("        created \(path)")
+        }
         let systemConfig = try await ConfigurationLoader.load()
         let image = try await ClientImage.fetch(
             reference: operation.imageReference,
