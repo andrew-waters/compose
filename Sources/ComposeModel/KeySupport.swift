@@ -48,6 +48,23 @@ public enum KeySupport: Sendable, Hashable {
         case .deferred(_, let reason), .unsupported(_, let reason): return reason
         }
     }
+
+    /// Whether honouring this needs a feature the runtime underneath does not have.
+    ///
+    /// The difference is the first thing anyone reading a list of what will not happen wants
+    /// to know. A key that is merely not implemented here yet is a promise someone can chase;
+    /// a key the runtime cannot support is not this project's to fix, and no amount of work
+    /// here will change it.
+    public var needsRuntimeSupport: Bool {
+        if case .unsupported = self { return true }
+        return false
+    }
+
+    /// Understood, and not implemented here yet.
+    public var isDeferred: Bool {
+        if case .deferred = self { return true }
+        return false
+    }
 }
 
 /// The v1 coverage table: every compose key this implementation knows the name of, and what

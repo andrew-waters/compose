@@ -164,6 +164,34 @@ struct FindingTests {
         #expect(finding.message.contains("appdata"))
     }
 
+    @Test("A finding says whether the runtime is the obstacle, or this project is")
+    func obstacleIsNamed() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              app:
+                image: nginx
+                restart: always
+                entrypoint: /bin/sh
+                nonsense: 1
+            """
+        )
+        let byKey = Dictionary(grouping: result.findings, by: \.key)
+
+        // The runtime has no restart policy: no work here changes that.
+        let restart = try #require(byKey["restart"]?.first)
+        #expect(restart.support.needsRuntimeSupport)
+        #expect(!restart.support.isDeferred)
+
+        // Overriding an entrypoint is only a matter of this not doing it yet.
+        let entrypoint = try #require(byKey["entrypoint"]?.first)
+        #expect(entrypoint.support.isDeferred)
+        #expect(!entrypoint.support.needsRuntimeSupport)
+
+        // And a key nobody defines is neither.
+        #expect(byKey["nonsense"]?.first?.kind == .unknownKey)
+    }
+
     @Test("`restart: no` is honoured exactly, so it is not reported")
     func restartNoIsHonoured() throws {
         let honoured = try Fixture.parse(

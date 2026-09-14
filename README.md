@@ -13,12 +13,12 @@ container compose up
 container compose down
 ```
 
-It can be ran in standalone mode (on the CLI) or as part of the [Orchard UI App for
+It can be run in standalone mode (on the CLI) or as part of the [Orchard UI App for
 containers](https://github.com/andrew-waters/orchard).
 
 I would also encourage the community to rally around a single solution, contribute to it to
-bring it up to spec with all features missign from docker and for other UI to build on so
-that efforts are centralised and consistent bs a fragmented ecosystem.
+bring it up to spec with all features missing from Docker and for other UIs to build on so
+that efforts are centralised and consistent rather than a fragmented ecosystem.
 
 ## Why this exists
 
