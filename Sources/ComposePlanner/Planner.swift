@@ -7,6 +7,9 @@ import ComposeModel
 /// still a reason not to have created the first three.
 public enum PlanError: Error, Sendable, Equatable, CustomStringConvertible {
     case dependencyCycle([String])
+    /// Two services in the same file want the same host port.
+    case duplicatePort(port: UInt16, services: [String])
+    /// A service wants a host port something already running is using.
     case portConflict(port: UInt16, service: String, heldBy: String)
     case duplicateContainerName(name: String, services: [String])
     case missingExternalNetwork(name: String, service: String)
@@ -15,8 +18,11 @@ public enum PlanError: Error, Sendable, Equatable, CustomStringConvertible {
         switch self {
         case .dependencyCycle(let path):
             return "`depends_on` is circular: \(path.joined(separator: " -> "))"
+        case .duplicatePort(let port, let services):
+            return "services \(services.map { "`\($0)`" }.joined(separator: " and ")) "
+                + "both publish host port \(port)"
         case .portConflict(let port, let service, let heldBy):
-            return "service `\(service)` publishes host port \(port), which \(heldBy) already uses"
+            return "service `\(service)` publishes host port \(port), which \(heldBy) is already using"
         case .duplicateContainerName(let name, let services):
             return "services \(services.map { "`\($0)`" }.joined(separator: " and ")) both want the container name `\(name)`"
         case .missingExternalNetwork(let name, let service):
@@ -411,6 +417,11 @@ public enum Planner {
 
     /// Every published port, checked against every other service and against everything already
     /// running, before an operation exists to conflict with.
+    ///
+    /// Only running containers count. A stopped container's configuration still names a host
+    /// port, but nothing is listening on it, and refusing to start a project because of a
+    /// container somebody stopped weeks ago would be wrong. The conflict surfaces when they
+    /// start it again, which is the same way every other tool behaves.
     private static func checkPorts(
         file: ComposeFile,
         order: [String],
@@ -424,16 +435,20 @@ public enum Planner {
             for port in service.ports {
                 guard let hostPort = port.hostPort else { continue }
                 if let other = wantedBy[hostPort], other != name {
-                    throw PlanError.portConflict(port: hostPort, service: name, heldBy: "service `\(other)`")
+                    throw PlanError.duplicatePort(port: hostPort, services: [other, name].sorted())
                 }
                 wantedBy[hostPort] = name
             }
         }
-        for container in state.containers where !releasedContainers.contains(container.name) {
+        for container in state.containers where container.isRunning && !releasedContainers.contains(container.name) {
             for port in container.publishedHostPorts.sorted() {
                 guard let wanting = wantedBy[port] else { continue }
                 guard containerNames[wanting] != container.name else { continue }
-                throw PlanError.portConflict(port: port, service: wanting, heldBy: "container `\(container.name)`")
+                throw PlanError.portConflict(
+                    port: port,
+                    service: wanting,
+                    heldBy: "container `\(container.name)`"
+                )
             }
         }
     }
@@ -447,14 +462,26 @@ public enum Planner {
         return "\(project.name)-\(service.name):latest"
     }
 
-    /// `nginx` and `nginx:latest` are the same image, and a registry host with a port is not a
-    /// tag.
+    /// The long form of an image reference: registry, namespace, name and tag, all present.
+    ///
+    /// A compose file writes `nginx`; the runtime stores `docker.io/library/nginx:latest`. They
+    /// are the same image, and deciding whether one is already here means saying so. The rules
+    /// are the ones every registry client uses: a bare name is Docker Hub's library namespace,
+    /// a first component with a dot, a colon or the name `localhost` is a registry host rather
+    /// than a namespace, and a reference with no tag and no digest means `latest`.
     public static func normalisedImageReference(_ reference: String) -> String {
-        guard let lastSlash = reference.lastIndex(of: "/") else {
-            return reference.contains(":") || reference.contains("@") ? reference : "\(reference):latest"
+        var components = reference.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard !components.isEmpty else { return reference }
+        if components.count == 1 {
+            components = ["docker.io", "library", components[0]]
+        } else if !components[0].contains("."), !components[0].contains(":"), components[0] != "localhost" {
+            components.insert("docker.io", at: 0)
         }
-        let component = reference[reference.index(after: lastSlash)...]
-        return component.contains(":") || component.contains("@") ? reference : "\(reference):latest"
+        let last = components[components.count - 1]
+        if !last.contains(":"), !last.contains("@") {
+            components[components.count - 1] = "\(last):latest"
+        }
+        return components.joined(separator: "/")
     }
 
     private static func shouldPull(_ image: String, state: CurrentState, policy: UpOptions.PullPolicy) -> Bool {
@@ -467,6 +494,30 @@ public enum Planner {
             let wanted = normalisedImageReference(image)
             return !state.images.contains { normalisedImageReference($0) == wanted }
         }
+    }
+
+    /// Image entrypoint, image cmd and the file's `command`, folded into the argument vector a
+    /// container is created with.
+    ///
+    /// `command:` replaces the image's cmd and leaves its entrypoint alone, which is what the
+    /// key means in compose and what the image's own config says. It lives here rather than in
+    /// whatever executes the plan because it is a decision, and because the alternative is two
+    /// front ends folding arguments slightly differently.
+    public static func processArguments(
+        imageEntrypoint: [String]?,
+        imageCmd: [String]?,
+        command: [String]
+    ) -> [String] {
+        var arguments: [String] = []
+        if let imageEntrypoint, !imageEntrypoint.isEmpty {
+            arguments = imageEntrypoint
+        }
+        if !command.isEmpty {
+            arguments.append(contentsOf: command)
+        } else if let imageCmd, !imageCmd.isEmpty {
+            arguments.append(contentsOf: imageCmd)
+        }
+        return arguments
     }
 
     // MARK: - Create
@@ -492,6 +543,7 @@ public enum Planner {
         let ports = service.ports.compactMap { port -> CreateOperation.Port? in
             guard let hostPort = port.hostPort else { return nil }
             return CreateOperation.Port(
+                hostAddress: port.hostIP ?? "0.0.0.0",
                 hostPort: hostPort,
                 containerPort: port.containerPort,
                 networkProtocol: port.networkProtocol.rawValue

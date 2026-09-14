@@ -1,0 +1,3 @@
+abstract = "Bring a set of services up and down from a compose file"
+author = "Andrew Waters"
+version = 0.1

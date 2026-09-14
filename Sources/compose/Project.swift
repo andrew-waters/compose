@@ -1,0 +1,96 @@
+import ArgumentParser
+import ComposeModel
+import ComposeParser
+import ComposePlanner
+import Foundation
+
+/// A compose file, found, read and understood, plus what it asked for and will not get.
+struct LoadedProject {
+    let path: String
+    let identity: ProjectIdentity
+    let result: ParseResult
+
+    var file: ComposeFile { result.file }
+}
+
+enum ProjectLoader {
+    /// The names compose looks for, in the order it looks for them.
+    static let candidateNames = [
+        "compose.yaml",
+        "compose.yml",
+        "docker-compose.yaml",
+        "docker-compose.yml",
+    ]
+
+    static func load(_ options: CommonOptions) throws -> LoadedProject {
+        let path = try locate(options.file)
+        let result: ParseResult
+        do {
+            result = try ComposeFileParser.parse(contentsOfFile: path)
+        } catch let error as ParseError {
+            throw ComposeError("\(path):\(error.description)")
+        } catch {
+            throw ComposeError("\(path) could not be read: \(error.localizedDescription)")
+        }
+        let directory = (path as NSString).deletingLastPathComponent
+        let identity = ProjectIdentity.resolve(
+            explicitName: options.projectName,
+            file: result.file,
+            projectDirectory: directory.isEmpty ? FileManager.default.currentDirectoryPath : directory
+        )
+        return LoadedProject(path: path, identity: identity, result: result)
+    }
+
+    /// What the plugin does about keys it will not honour.
+    ///
+    /// It refuses the file. A command in a script has nobody to ask, and a database that never
+    /// comes back after a crash because `restart: always` was quietly dropped is worse than a
+    /// command that would not run. Orchard, which does have somebody to ask, shows the same
+    /// list and lets them decide.
+    ///
+    /// Only behavioural findings refuse. Cosmetic ones are printed and stepped over: nobody
+    /// should be blocked by an obsolete `version` key.
+    ///
+    /// `down` never calls this. Refusing to stop containers over a key nothing is about to act
+    /// on would leave someone with no way to clean up.
+    static func enforcePolicy(on project: LoadedProject) throws {
+        for warning in project.result.interpolationWarnings {
+            Output.warning(warning.message)
+        }
+        for finding in project.result.findings where finding.severity == .cosmetic {
+            Output.note("note: \(finding.message)")
+        }
+
+        let blocking = project.result.blockingFindings
+        guard blocking.isEmpty else {
+            let count = blocking.count
+            Output.error(
+                "\(project.path) asks for \(count) thing\(count == 1 ? "" : "s") this cannot do",
+                details: blocking.map(\.message)
+            )
+            Output.error(
+                "nothing was created. Remove the keys, or open the project in Orchard, which can "
+                    + "list what it would ignore and let you decide."
+            )
+            throw ExitCode.failure
+        }
+    }
+
+    private static func locate(_ explicit: String?) throws -> String {
+        let fileManager = FileManager.default
+        if let explicit {
+            guard fileManager.fileExists(atPath: explicit) else {
+                throw ComposeError("`\(explicit)` does not exist")
+            }
+            return explicit
+        }
+        let directory = fileManager.currentDirectoryPath
+        for name in candidateNames {
+            let path = (directory as NSString).appendingPathComponent(name)
+            if fileManager.fileExists(atPath: path) { return path }
+        }
+        throw ComposeError(
+            "no compose file in \(directory); looked for \(candidateNames.joined(separator: ", "))"
+        )
+    }
+}

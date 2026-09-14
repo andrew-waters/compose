@@ -235,12 +235,7 @@ struct UpTests {
             """
         )
         let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState())
-        let create = try #require(
-            plan.operations.compactMap { operation -> CreateOperation? in
-                guard case .createContainer(let create) = operation else { return nil }
-                return create
-            }.first
-        )
+        let create = try #require(plan.createOperations.first)
         #expect(create.containerName == "shop-web")
         #expect(create.networkName == "shop_default")
         #expect(create.labels[ProjectIdentity.projectLabel] == "shop")
@@ -249,6 +244,99 @@ struct UpTests {
         #expect(create.labels["com.example.role"] == "front")
         #expect(create.environment == ["A=one", "B=two"])
         #expect(create.ports == [CreateOperation.Port(hostPort: 8080, containerPort: 80, networkProtocol: "tcp")])
+    }
+}
+
+@Suite("Turning a service into a container")
+struct CreateOperationTests {
+    @Test("An image's entrypoint survives a command override")
+    func processArguments() {
+        #expect(
+            Planner.processArguments(imageEntrypoint: ["/bin/tini", "--"], imageCmd: ["nginx"], command: [])
+                == ["/bin/tini", "--", "nginx"]
+        )
+        #expect(
+            Planner.processArguments(
+                imageEntrypoint: ["/bin/tini", "--"],
+                imageCmd: ["nginx"],
+                command: ["sleep", "1"]
+            ) == ["/bin/tini", "--", "sleep", "1"]
+        )
+        #expect(Planner.processArguments(imageEntrypoint: nil, imageCmd: ["nginx"], command: []) == ["nginx"])
+        #expect(Planner.processArguments(imageEntrypoint: nil, imageCmd: ["nginx"], command: ["sleep"]) == ["sleep"])
+        #expect(Planner.processArguments(imageEntrypoint: nil, imageCmd: nil, command: []).isEmpty)
+    }
+
+    @Test("An image reference is compared in the form the runtime keeps it in")
+    func imageReferenceNormalisation() {
+        #expect(Planner.normalisedImageReference("alpine") == "docker.io/library/alpine:latest")
+        #expect(Planner.normalisedImageReference("alpine:3.22") == "docker.io/library/alpine:3.22")
+        #expect(Planner.normalisedImageReference("jrei/systemd-ubuntu") == "docker.io/jrei/systemd-ubuntu:latest")
+        #expect(Planner.normalisedImageReference("ghcr.io/foo/bar") == "ghcr.io/foo/bar:latest")
+        #expect(Planner.normalisedImageReference("localhost:5000/thing") == "localhost:5000/thing:latest")
+        #expect(
+            Planner.normalisedImageReference("docker.io/library/nginx:latest") == "docker.io/library/nginx:latest"
+        )
+        #expect(
+            Planner.normalisedImageReference("alpine@sha256:abc") == "docker.io/library/alpine@sha256:abc"
+        )
+    }
+
+    @Test("An image the runtime already has under its long name is not pulled again")
+    func longFormImagesAreRecognised() throws {
+        let file = try Sample.file("services:\n  web:\n    image: alpine\n    command: sleep 1\n")
+        let state = CurrentState(images: ["docker.io/library/alpine:latest"])
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(!plan.operations.contains { $0.summary.hasPrefix("pull") })
+    }
+
+    @Test("A port published to one interface stays on that interface")
+    func hostAddressSurvives() throws {
+        let file = try Sample.file(
+            """
+            services:
+              web:
+                image: nginx
+                ports:
+                  - "127.0.0.1:8080:80"
+                  - "9090:90/udp"
+            """
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState())
+        let create = try #require(plan.createOperations.first)
+        #expect(create.ports == [
+            CreateOperation.Port(hostAddress: "127.0.0.1", hostPort: 8080, containerPort: 80, networkProtocol: "tcp"),
+            CreateOperation.Port(hostPort: 9090, containerPort: 90, networkProtocol: "udp"),
+        ])
+    }
+
+    @Test("Mounts and limits arrive in the shape the create call wants")
+    func mountsAndLimits() throws {
+        let file = try Sample.file(
+            """
+            services:
+              db:
+                image: postgres:16
+                volumes:
+                  - ./data:/var/lib/postgresql/data
+                  - ./seed:/seed:ro
+                working_dir: /srv
+                deploy:
+                  resources:
+                    limits:
+                      cpus: "0.5"
+                      memory: 512m
+            """
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState())
+        let create = try #require(plan.createOperations.first)
+        #expect(create.mounts == [
+            CreateOperation.Mount(hostPath: "/project/data", containerPath: "/var/lib/postgresql/data", readOnly: false),
+            CreateOperation.Mount(hostPath: "/project/seed", containerPath: "/seed", readOnly: true),
+        ])
+        #expect(create.workingDirectory == "/srv")
+        #expect(create.cpus == 0.5)
+        #expect(create.memoryBytes == 512 << 20)
     }
 }
 
@@ -270,24 +358,36 @@ struct PlanRefusalTests {
         let error = #expect(throws: PlanError.self) {
             try Planner.up(file: file, project: Sample.project, state: CurrentState())
         }
-        guard case .portConflict(let port, _, let heldBy) = try #require(error) else {
-            Issue.record("expected a port conflict")
+        guard case .duplicatePort(let port, let services) = try #require(error) else {
+            Issue.record("expected a duplicate port")
             return
         }
         #expect(port == 8080)
-        #expect(heldBy.contains("service"))
+        #expect(services == ["admin", "web"])
+        #expect(error?.description == "services `admin` and `web` both publish host port 8080")
     }
 
     @Test("A port something else already holds fails the whole plan before anything is created")
     func portConflictWithTheHost() throws {
         let file = try Sample.file("services:\n  web:\n    image: nginx\n    ports: [\"8080:80\"]\n")
         let state = CurrentState(
-            containers: [ContainerState(name: "someone-elses", publishedHostPorts: [8080])]
+            containers: [ContainerState(name: "someone-elses", isRunning: true, publishedHostPorts: [8080])]
         )
         let error = #expect(throws: PlanError.self) {
             try Planner.up(file: file, project: Sample.project, state: state)
         }
         #expect(error?.description.contains("someone-elses") == true)
+    }
+
+    @Test("A stopped container is not holding the port it was configured with")
+    func stoppedContainersDoNotHoldPorts() throws {
+        let file = try Sample.file("services:\n  web:\n    image: nginx\n    ports: [\"8080:80\"]\n")
+        let state = CurrentState(
+            containers: [ContainerState(name: "someone-elses", isRunning: false, publishedHostPorts: [8080])],
+            images: ["nginx"]
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(plan.operations.contains { $0.summary == "create container shop-web" })
     }
 
     @Test("A port a container of this project already holds is not a conflict with itself")

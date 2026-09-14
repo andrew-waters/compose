@@ -112,11 +112,20 @@ public struct CreateOperation: Sendable, Equatable {
     }
 
     public struct Port: Sendable, Equatable {
+        /// The host interface to publish on. `0.0.0.0` unless the file named one, which is a
+        /// difference worth keeping: a port bound to `127.0.0.1` is not on the network.
+        public let hostAddress: String
         public let hostPort: UInt16
         public let containerPort: UInt16
         public let networkProtocol: String
 
-        public init(hostPort: UInt16, containerPort: UInt16, networkProtocol: String) {
+        public init(
+            hostAddress: String = "0.0.0.0",
+            hostPort: UInt16,
+            containerPort: UInt16,
+            networkProtocol: String
+        ) {
+            self.hostAddress = hostAddress
             self.hostPort = hostPort
             self.containerPort = containerPort
             self.networkProtocol = networkProtocol

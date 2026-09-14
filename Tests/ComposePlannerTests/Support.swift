@@ -3,6 +3,16 @@ import ComposeParser
 import ComposePlanner
 import Testing
 
+extension Plan {
+    /// The containers a plan creates, in order.
+    var createOperations: [CreateOperation] {
+        operations.compactMap { operation in
+            guard case .createContainer(let create) = operation else { return nil }
+            return create
+        }
+    }
+}
+
 enum Sample {
     /// Parse without touching the disk: no `.env`, and nothing in these files names an
     /// `env_file`.

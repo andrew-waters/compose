@@ -4,10 +4,9 @@ Compose-style orchestration for [Apple's container](https://github.com/apple/con
 bring a set of services up and down from a single file, on the Linux-containers-as-VMs
 stack that ships with macOS, without Docker Desktop.
 
-> **Status: the package works, the front ends do not exist.** The compose model, the parser
-> and the planner are written and tested. There is no `container compose` plugin yet, and no
-> Compose tab in Orchard. Everything below describes the whole design; the section on
-> building says what is actually here.
+> **Status: the package and the plugin work; the Orchard tab does not exist yet.** The compose
+> model, the parser and the planner are written and tested, and `container compose up` and
+> `container compose down` run on top of them. Orchard does not have its Compose tab yet.
 
 ## Why this exists
 
@@ -65,13 +64,65 @@ someone believing their database comes back after a crash. The plugin refuses a 
 cannot honour, naming the key, the service and the line. Orchard lists what it would ignore,
 lets you decide, and keeps showing it on the project afterwards.
 
-One limitation worth stating up front: without health reporting in the runtime, `up` starts
-dependencies before dependents but does not wait for them to become ready.
+Two limitations worth stating up front. Without health reporting in the runtime, `up` starts
+dependencies before dependents but does not wait for them to become ready. And a service does
+not answer to its service name: hostnames have to be unique across every container on the
+machine, so a container is reachable as `<project>-<service>` rather than as `db`. Compose's
+own naming needs per-network namespacing, which is
+[apple/container#1809](https://github.com/apple/container/issues/1809).
 
-## Commands
+## Using it
+
+Build the plugin and install it where the `container` CLI looks for plugins:
+
+```
+make build
+sudo make install
+```
+
+The plugin directory is root owned, which is what the `sudo` is for. The container installer
+wipes that directory on every upgrade
+([apple/container#1617](https://github.com/apple/container/issues/1617)), so expect to run
+`sudo make install` again after updating container. Orchard will eventually do this for you,
+behind an admin prompt, which is the route that actually solves the wiping.
+
+Then, in a directory with a `compose.yaml`:
+
+```
+container compose up                 # create and start everything, in dependency order
+container compose up --dry-run       # work out the plan, print it, change nothing
+container compose down               # stop and remove it all again
+```
 
 `up` and `down`, matching compose. The previous Go implementation used `start` and `stop`;
 those do not carry over.
+
+Both verbs take `-f` to point at a file elsewhere, `-p` to name the project (it otherwise
+comes from the file's `name`, then from the directory), and `--dry-run`. `up` also takes
+`--force-recreate`, `--pull missing|always|never` and `--keep-orphans`; `down` takes
+`--keep-networks`.
+
+Running `up` twice is the interesting case. The second run compares each service against the
+hash stamped on the container it produced, and creates, starts, leaves alone, recreates or
+removes each one accordingly. Containers are the only record: there is no state file.
+
+### What it refuses
+
+The plugin will not run a file it cannot honour. It names the key, the service and the line,
+and creates nothing:
+
+```
+error: compose.yaml asks for 2 things this cannot do
+  8:14: `restart` in service `db` is not honoured: container has no restart policy; a
+        container that exits stays exited
+  15:11: `user` in service `api` is not honoured: the create surface cannot set the process user
+error: nothing was created. Remove the keys, or open the project in Orchard, which can list
+       what it would ignore and let you decide.
+```
+
+Keys that cost nothing to ignore, such as an obsolete `version`, are printed as notes and
+stepped over. The difference is a severity carried per key, not a judgement made at the point
+of refusal.
 
 ## Relationship to container-compose/cli
 
@@ -87,7 +138,7 @@ swift build
 swift test
 ```
 
-Three library targets, and nothing that executes anything:
+Three library targets, none of which executes anything:
 
 - `ComposeModel`, the spec types, plus the table of which compose keys are honoured, deferred
   or impossible, with a severity on each.
@@ -97,10 +148,21 @@ Three library targets, and nothing that executes anything:
   itself, which takes a parsed file and a snapshot of what exists and returns an ordered list
   of operations.
 
-[Yams](https://github.com/jpsim/Yams) is the only dependency, and deliberately the only one.
+Plus one executable target, `compose`, which is the plugin: it parses, plans, prints, and
+executes the plan over the same client Orchard uses. It is the only target that knows a
+runtime exists.
+
+[Yams](https://github.com/jpsim/Yams) is the libraries' only dependency, and deliberately so.
 It is the YAML parser `apple/container` already uses, so linking this package into Orchard
 adds nothing to Orchard's dependency graph. It also reports a line and column for every node,
 which is what lets a refusal name the line it is refusing.
+
+The plugin adds `apple/container` itself and `swift-argument-parser`, both kept inside the
+executable target: a package that makes plans has no business linking a client for the thing
+that carries them out. One operation, `build`, is not carried out in process. Starting the
+BuildKit builder, dialling it and unpacking the result are all things the `container` CLI
+already does, so the plugin shells out to `container build` rather than reimplementing the
+hard part. Orchard does the same for the same reason.
 
 ## Requirements
 
