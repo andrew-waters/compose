@@ -1,0 +1,10 @@
+# Local working notes, never committed
+scratch
+
+# Swift build products
+.build/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+
+.DS_Store
