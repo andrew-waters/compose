@@ -2,8 +2,8 @@ import ComposeModel
 
 /// One thing to do, described completely enough that whoever runs it needs nothing else.
 ///
-/// Operations name what to do, never how. Orchard runs them over XPC and the plugin runs them
-/// the same way; neither reads the compose file again, and the tests run none of them.
+/// Operations name what to do, never how. A front end runs them against the runtime; none of
+/// them reads the compose file again, and the tests run none of them at all.
 public enum Operation: Sendable, Equatable {
     case createNetwork(NetworkOperation)
     case removeNetwork(NetworkOperation)

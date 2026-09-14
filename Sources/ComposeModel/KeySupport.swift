@@ -161,8 +161,8 @@ public struct SourceMark: Sendable, Equatable, Hashable, CustomStringConvertible
 /// Something in the file this implementation will not act on, recorded rather than dropped.
 ///
 /// Findings are returned from a parse instead of thrown, because the right response differs
-/// between front ends: the plugin refuses a file carrying any of them, Orchard shows the list
-/// and lets the user decide, then keeps showing it on the project afterwards.
+/// between front ends: a command refuses a file carrying any of them, since nobody is there to
+/// ask, while a front end with a window can show the list and let the user decide.
 public struct Finding: Sendable, Equatable, Identifiable, Hashable {
     /// Why a key is being reported.
     public enum Kind: String, Sendable, Hashable {

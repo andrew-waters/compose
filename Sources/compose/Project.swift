@@ -41,12 +41,11 @@ enum ProjectLoader {
         return LoadedProject(path: path, identity: identity, result: result)
     }
 
-    /// What the plugin does about keys it will not honour.
+    /// What this does about keys it will not honour.
     ///
     /// It refuses the file. A command in a script has nobody to ask, and a database that never
     /// comes back after a crash because `restart: always` was quietly dropped is worse than a
-    /// command that would not run. Orchard, which does have somebody to ask, shows the same
-    /// list and lets them decide.
+    /// command that would not run.
     ///
     /// Only behavioural findings refuse. Cosmetic ones are printed and stepped over: nobody
     /// should be blocked by an obsolete `version` key.
@@ -68,10 +67,7 @@ enum ProjectLoader {
                 "\(project.path) asks for \(count) thing\(count == 1 ? "" : "s") this cannot do",
                 details: blocking.map(\.message)
             )
-            Output.error(
-                "nothing was created. Remove the keys, or open the project in Orchard, which can "
-                    + "list what it would ignore and let you decide."
-            )
+            Output.error("nothing was created. Remove or change those keys and run again.")
             throw ExitCode.failure
         }
     }

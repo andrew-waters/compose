@@ -10,8 +10,8 @@ import TerminalProgress
 
 /// The only part of the plugin that talks to the runtime.
 ///
-/// Everything above this decides; this carries out. The split is the same one Orchard will
-/// make, and it is why the planner can be tested without any of this existing.
+/// Everything above this decides; this carries out. The split is why the planner can be
+/// tested without any of this existing.
 enum Runtime {
     // MARK: - Reading the world
 
@@ -122,9 +122,8 @@ enum Runtime {
     /// The one operation that is not carried out in process.
     ///
     /// Building needs the BuildKit builder started, dialled and its result unpacked, and the
-    /// CLI is the only thing that does all three. Orchard shells out to `container build` for
-    /// exactly this reason; doing anything else here would be a second implementation of the
-    /// hard part.
+    /// CLI is the only thing that does all three. Doing anything else here would be a second
+    /// implementation of the hard part.
     private static func build(_ operation: BuildOperation) throws {
         var arguments = [
             "build",

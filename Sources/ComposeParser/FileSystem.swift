@@ -3,8 +3,8 @@ import Foundation
 /// The parser's entire contact with the disk: `.env` and `env_file`.
 ///
 /// It is a protocol so that a test can hand the parser a file set without writing anything to
-/// a temporary directory, and so that Orchard can read files through whatever it already uses
-/// for sandbox-scoped access rather than through `FileManager` directly.
+/// a temporary directory, and so that an application embedding this can read files through
+/// whatever it already uses for scoped access rather than through `FileManager` directly.
 public protocol ComposeFileSystem: Sendable {
     func fileExists(atPath path: String) -> Bool
     func contentsOfFile(atPath path: String) throws -> String

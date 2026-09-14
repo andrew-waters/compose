@@ -5,8 +5,8 @@ import Foundation
 /// The project name, the labels derived from it, and the hash that makes a second `up` sane.
 ///
 /// There is no state file anywhere. Everything this type produces is stamped onto containers
-/// at create time, and read back off them to work out what a project currently is, which is
-/// how every other Orchard view already works.
+/// at create time, and read back off them to work out what a project currently is. The
+/// containers are the record.
 public struct ProjectIdentity: Sendable, Hashable {
     /// The project a container belongs to.
     public static let projectLabel = "com.orchard.compose.project"

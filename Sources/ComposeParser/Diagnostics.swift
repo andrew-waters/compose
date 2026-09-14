@@ -42,7 +42,7 @@ public struct ParseError: Error, Sendable, Equatable, CustomStringConvertible {
         self.path = path
     }
 
-    /// The line the plugin prints and Orchard shows: location, path, problem.
+    /// The line a front end prints: location, path, problem.
     public var description: String {
         var text = ""
         if let mark { text += "\(mark.line):\(mark.column): " }
@@ -107,10 +107,10 @@ public struct ParseResult: Sendable {
 
     /// Findings a caller should not proceed past without asking someone.
     ///
-    /// This is the plugin's cue to refuse the file: no terminal caller gets to answer the
-    /// question, so a key that changes runtime behaviour has to be an error there. Orchard
-    /// shows the same list and lets a person decide. Cosmetic findings never block: refusing
-    /// a file over `version: "3.8"` would be absurd.
+    /// This is a command-line front end's cue to refuse the file: no terminal caller gets to
+    /// answer the question, so a key that changes runtime behaviour has to be an error there.
+    /// A front end with a window can show the same list and let a person decide. Cosmetic
+    /// findings never block: refusing a file over `version: "3.8"` would be absurd.
     public var blockingFindings: [Finding] {
         findings.filter { $0.severity == .behavioural }
     }
