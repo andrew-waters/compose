@@ -4,16 +4,20 @@ import Foundation
 
 /// The project name, the labels derived from it, and the hash that makes a second `up` sane.
 ///
+/// The labels are namespaced to this project rather than to whatever created the container,
+/// so that every front end reads and writes the same three keys and none of them stamps
+/// another tool's name on someone's containers.
+///
 /// There is no state file anywhere. Everything this type produces is stamped onto containers
 /// at create time, and read back off them to work out what a project currently is. The
 /// containers are the record.
 public struct ProjectIdentity: Sendable, Hashable {
     /// The project a container belongs to.
-    public static let projectLabel = "com.orchard.compose.project"
+    public static let projectLabel = "com.container-compose.project"
     /// The key the container's service sits under in the file.
-    public static let serviceLabel = "com.orchard.compose.service"
+    public static let serviceLabel = "com.container-compose.service"
     /// The hash of the resolved service at the moment the container was created.
-    public static let hashLabel = "com.orchard.compose.hash"
+    public static let hashLabel = "com.container-compose.hash"
 
     public let name: String
 
