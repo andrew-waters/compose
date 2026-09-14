@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["*"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # The package declares macOS 26 and the plugin links apple/container, which needs the
+    # same SDK, so this has to be a Tahoe runner. The tests themselves need nothing: the
+    # planner is a pure function and the parser reads strings, so no daemon runs here.
+    runs-on: macos-26
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest-stable
+
+      # Only the checkouts are cached, not the build. Cloning apple/container and
+      # containerization is the slow part; caching object files as well has a habit of
+      # producing incremental builds that succeed on nothing but the cache.
+      - name: Cache SwiftPM checkouts
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Swift version
+        run: swift --version
+
+      # Builds every target, the plugin included, and runs the library tests.
+      - name: Test
+        run: swift test
+
+      # The plugin is what people install, so build it the way it is shipped rather than
+      # trusting that a debug build implies a release one.
+      - name: Build the plugin
+        run: swift build -c release --product compose
+
+      # A plugin is a directory with a config file and a binary whose name matches it. If
+      # that layout is wrong the CLI simply does not find the plugin, with no error worth
+      # reading, so check it here rather than discovering it after an install.
+      - name: Check the plugin layout
+        run: |
+          make install PREFIX="$RUNNER_TEMP/root"
+          test -x "$RUNNER_TEMP/root/libexec/container-plugins/compose/bin/compose"
+          test -f "$RUNNER_TEMP/root/libexec/container-plugins/compose/config.toml"
+          "$RUNNER_TEMP/root/libexec/container-plugins/compose/bin/compose" --help
