@@ -1,0 +1,48 @@
+name: shop
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      POSTGRES_DB: shop
+    volumes:
+      - ./data:/var/lib/postgresql/data
+    networks: [backend]
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+      args:
+        VERSION: "1.2"
+    command: ["./serve", "--port", "8080"]
+    working_dir: /srv
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:9229:9229/tcp"
+    environment:
+      - DATABASE_URL=postgres://db:5432/shop
+    labels:
+      com.example.role: api
+    depends_on:
+      - db
+    networks: [backend]
+
+  web:
+    image: nginx
+    container_name: shop-front
+    ports:
+      - "80:80"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+    depends_on: [api]
+    networks: [backend]
+
+networks:
+  backend: {}

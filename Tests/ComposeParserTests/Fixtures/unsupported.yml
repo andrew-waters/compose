@@ -1,0 +1,21 @@
+services:
+  app:
+    image: app:latest
+    restart: always
+    user: "1000:1000"
+    entrypoint: /bin/sh
+    platform: linux/arm64
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+    dns:
+      - 1.1.1.1
+    ports:
+      - "3000"
+    volumes:
+      - appdata:/data
+    labels:
+      - role=app
+    typo_key: 1
+
+volumes:
+  appdata: {}

@@ -4,8 +4,10 @@ Compose-style orchestration for [Apple's container](https://github.com/apple/con
 bring a set of services up and down from a single file, on the Linux-containers-as-VMs
 stack that ships with macOS, without Docker Desktop.
 
-> **Status: nothing is built yet.** The design is settled and the code is not written. This
-> README describes what is being built, not what works today.
+> **Status: the package works, the front ends do not exist.** The compose model, the parser
+> and the planner are written and tested. There is no `container compose` plugin yet, and no
+> Compose tab in Orchard. Everything below describes the whole design; the section on
+> building says what is actually here.
 
 ## Why this exists
 
@@ -77,6 +79,28 @@ those do not carry over.
 implementation that wraps the `container` CLI. It is superseded by this repository. Go
 cannot be linked into a native macOS app, and the whole point of this design is that the
 planning logic is shared between the terminal and the GUI rather than reimplemented.
+
+## Building
+
+```
+swift build
+swift test
+```
+
+Three library targets, and nothing that executes anything:
+
+- `ComposeModel`, the spec types, plus the table of which compose keys are honoured, deferred
+  or impossible, with a severity on each.
+- `ComposeParser`, YAML to model: interpolation, `.env` and `env_file`, short and long forms,
+  and a line and column on every error.
+- `ComposePlanner`, the dependency graph, project identity and hashing, and the planner
+  itself, which takes a parsed file and a snapshot of what exists and returns an ordered list
+  of operations.
+
+[Yams](https://github.com/jpsim/Yams) is the only dependency, and deliberately the only one.
+It is the YAML parser `apple/container` already uses, so linking this package into Orchard
+adds nothing to Orchard's dependency graph. It also reports a line and column for every node,
+which is what lets a refusal name the line it is refusing.
 
 ## Requirements
 

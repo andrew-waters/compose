@@ -1,0 +1,180 @@
+import ComposeModel
+import ComposeParser
+import Foundation
+import Testing
+
+@Suite("Parsing a whole file")
+struct FileParsingTests {
+    @Test("A realistic file resolves into the model")
+    func fullFixture() throws {
+        let result = try Fixture.parse(try Fixture.text("full"))
+        let file = result.file
+
+        #expect(file.name == "shop")
+        #expect(file.services.count == 3)
+        #expect(file.orderedServices.map(\.name) == ["api", "db", "web"])
+
+        let db = try #require(file.services["db"])
+        #expect(db.image == "postgres:16")
+        #expect(db.environment["POSTGRES_PASSWORD"] == "secret")
+        #expect(db.environment["POSTGRES_DB"] == "shop")
+        #expect(db.mounts == [
+            Service.Mount(source: .bind("/project/data"), target: "/var/lib/postgresql/data")
+        ])
+        #expect(db.resources?.cpus == 2)
+        #expect(db.resources?.memoryBytes == 1 << 30)
+
+        let api = try #require(file.services["api"])
+        #expect(api.build?.context == "/project/api")
+        #expect(api.build?.dockerfile == "Dockerfile.dev")
+        #expect(api.build?.args == ["VERSION": "1.2"])
+        #expect(api.command == ["./serve", "--port", "8080"])
+        #expect(api.workingDirectory == "/srv")
+        #expect(api.environment == ["DATABASE_URL": "postgres://db:5432/shop"])
+        #expect(api.labels == ["com.example.role": "api"])
+        #expect(api.dependsOn == ["db"])
+        #expect(api.ports == [
+            Service.Port(hostPort: 8080, containerPort: 8080),
+            Service.Port(hostIP: "127.0.0.1", hostPort: 9229, containerPort: 9229),
+        ])
+
+        let web = try #require(file.services["web"])
+        #expect(web.containerName == "shop-front")
+        #expect(web.mounts.first?.readOnly == true)
+        #expect(file.networks["backend"]?.resolvedName(projectName: "shop") == "shop_backend")
+
+        // Nothing in this file is beyond v1, so nothing should be reported.
+        #expect(result.findings.isEmpty)
+        #expect(result.interpolationWarnings.isEmpty)
+    }
+
+    @Test("Version 2 files are refused rather than half read")
+    func versionTwoIsRefused() throws {
+        let error = #expect(throws: ParseError.self) {
+            try Fixture.parse(try Fixture.text("version-2"))
+        }
+        #expect(error?.reason == .unsupportedSpecVersion)
+        #expect(error?.mark?.line == 1)
+    }
+
+    @Test("An empty or shapeless file is an error, not an empty project")
+    func shapelessFiles() throws {
+        #expect(throws: ParseError.self) { try Fixture.parse("") }
+        #expect(throws: ParseError.self) { try Fixture.parse("- one\n- two\n") }
+        let missing = #expect(throws: ParseError.self) { try Fixture.parse("name: thing\n") }
+        #expect(missing?.reason == .missingKey)
+    }
+
+    @Test("Malformed YAML keeps the line it failed on")
+    func malformedYAML() throws {
+        let error = #expect(throws: ParseError.self) {
+            try Fixture.parse("services:\n  web:\n   image: \"unclosed\n")
+        }
+        #expect(error?.reason == .malformedYAML)
+        #expect(error?.mark != nil)
+    }
+
+    @Test("A service needs something to run")
+    func serviceWithoutImageOrBuild() throws {
+        let error = #expect(throws: ParseError.self) {
+            try Fixture.parse("services:\n  web:\n    command: sleep 1\n")
+        }
+        #expect(error?.reason == .missingKey)
+    }
+
+    @Test("References that go nowhere are refused")
+    func danglingReferences() throws {
+        let dependency = #expect(throws: ParseError.self) {
+            try Fixture.parse(
+                """
+                services:
+                  web:
+                    image: nginx
+                    depends_on: [db]
+                """
+            )
+        }
+        #expect(dependency?.reason == .undefinedReference)
+
+        let network = #expect(throws: ParseError.self) {
+            try Fixture.parse(
+                """
+                services:
+                  web:
+                    image: nginx
+                    networks: [backend]
+                """
+            )
+        }
+        #expect(network?.reason == .undefinedReference)
+    }
+}
+
+@Suite("What a file asks for and will not get")
+struct FindingTests {
+    @Test("Unsupported keys are reported with their severity, service and line")
+    func unsupportedKeys() throws {
+        let result = try Fixture.parse(try Fixture.text("unsupported"))
+        let byKey = Dictionary(grouping: result.findings, by: \.key)
+
+        let restart = try #require(byKey["restart"]?.first)
+        #expect(restart.service == "app")
+        #expect(restart.severity == .behavioural)
+        #expect(restart.support == KeySupportTable.service["restart"])
+        #expect(restart.mark?.line == 4)
+        #expect(restart.message.contains("`restart` in service `app`"))
+
+        #expect(byKey["user"]?.first?.severity == .behavioural)
+        #expect(byKey["entrypoint"]?.first?.support.severity == .behavioural)
+        #expect(byKey["healthcheck"] != nil)
+        #expect(byKey["dns"] != nil)
+
+        // Cosmetic keys are reported too, and do not block.
+        let platform = try #require(byKey["platform"]?.first)
+        #expect(platform.severity == .cosmetic)
+        #expect(!result.blockingFindings.contains(platform))
+
+        // A key nobody has ever defined is reported as a typo rather than as unsupported.
+        let unknown = try #require(byKey["typo_key"]?.first)
+        #expect(unknown.kind == .unknownKey)
+
+        // The file still parses: findings are not errors.
+        #expect(result.file.services["app"]?.image == "app:latest")
+        #expect(result.file.services["app"]?.labels == ["role": "app"])
+    }
+
+    @Test("A port with no host port is published by nobody, and says so")
+    func ephemeralPort() throws {
+        let result = try Fixture.parse(try Fixture.text("unsupported"))
+        let port = try #require(result.file.services["app"]?.ports.first)
+        #expect(port.hostPort == nil)
+        #expect(port.containerPort == 3000)
+        let finding = try #require(result.findings.first { $0.key == "ports" })
+        #expect(finding.kind == .unhandledForm)
+        #expect(finding.severity == .behavioural)
+    }
+
+    @Test("A named volume is dropped loudly rather than mounted quietly")
+    func namedVolume() throws {
+        let result = try Fixture.parse(try Fixture.text("unsupported"))
+        #expect(result.file.services["app"]?.mounts.isEmpty == true)
+        let finding = try #require(result.findings.first { $0.key == "volumes" })
+        #expect(finding.severity == .behavioural)
+        #expect(finding.message.contains("appdata"))
+    }
+
+    @Test("`version` is obsolete, not fatal, and does not block")
+    func obsoleteVersionKey() throws {
+        let result = try Fixture.parse(
+            """
+            version: "3.8"
+            services:
+              web:
+                image: nginx
+            """
+        )
+        let finding = try #require(result.findings.first { $0.key == "version" })
+        #expect(finding.severity == .cosmetic)
+        #expect(result.blockingFindings.isEmpty)
+    }
+}
