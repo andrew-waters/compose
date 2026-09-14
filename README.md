@@ -124,12 +124,12 @@ Keys that cost nothing to ignore, such as an obsolete `version`, are printed as 
 stepped over. The difference is a severity carried per key, not a judgement made at the point
 of refusal.
 
-## Relationship to container-compose/cli
+## History
 
-[`container-compose/cli`](https://github.com/container-compose/cli) is an earlier Go
-implementation that wraps the `container` CLI. It is superseded by this repository. Go
-cannot be linked into a native macOS app, and the whole point of this design is that the
-planning logic is shared between the terminal and the GUI rather than reimplemented.
+An earlier Go implementation wrapped the `container` CLI. This replaces it, and it has been
+removed rather than archived. Go cannot be linked into a native macOS app, and the whole point
+of this design is that the planning logic is shared between the terminal and the GUI rather
+than reimplemented in each.
 
 ## Building
 
