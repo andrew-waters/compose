@@ -44,6 +44,12 @@ extension FileParser {
                 service.labels = try parseLabels(valueNode, service: name, path: "\(base).labels")
             case "networks":
                 service.networks = try parseServiceNetworks(valueNode, service: name, path: "\(base).networks")
+            case "dns":
+                service.dns = try parseStringOrList(valueNode, path: "\(base).dns")
+            case "dns_search":
+                service.dnsSearch = try parseStringOrList(valueNode, path: "\(base).dns_search")
+            case "dns_opt":
+                service.dnsOptions = try parseStringOrList(valueNode, path: "\(base).dns_opt")
             case "deploy":
                 service.resources = try parseDeploy(valueNode, service: name, path: "\(base).deploy")
             case "depends_on":
@@ -529,6 +535,20 @@ extension FileParser {
             )
             return nil
         }
+    }
+
+    // MARK: - resolver
+
+    /// `dns`, `dns_search` and `dns_opt` each take a bare string or a list of them, which is
+    /// the short and long form compose uses throughout.
+    private mutating func parseStringOrList(_ node: Node, path: String) throws -> [String] {
+        if node.null != nil { return [] }
+        if node.sequence != nil {
+            return try sequence(node, path: path).enumerated().map { index, element in
+                try string(element, path: "\(path)[\(index)]")
+            }
+        }
+        return [try string(node, path: path)]
     }
 
     // MARK: - networks

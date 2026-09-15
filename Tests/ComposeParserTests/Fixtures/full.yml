@@ -33,6 +33,12 @@ services:
     depends_on:
       - db
     networks: [backend]
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    dns_search: example.internal
+    dns_opt:
+      - ndots:1
 
   web:
     image: nginx
