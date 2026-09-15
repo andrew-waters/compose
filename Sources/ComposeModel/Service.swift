@@ -113,6 +113,11 @@ public struct Service: Sendable, Hashable, Identifiable {
     public var labels: [String: String]
     /// Networks by the key they carry in the top-level `networks:` block, in file order.
     public var networks: [String]
+    /// Nameservers, in the order the resolver should try them. Empty leaves the choice to the
+    /// runtime, which fills in the network's own resolver.
+    public var dns: [String]
+    public var dnsSearch: [String]
+    public var dnsOptions: [String]
     public var resources: Resources?
     /// Service names this one must start after, already checked to exist.
     public var dependsOn: [String]
@@ -130,6 +135,9 @@ public struct Service: Sendable, Hashable, Identifiable {
         mounts: [Mount] = [],
         labels: [String: String] = [:],
         networks: [String] = [],
+        dns: [String] = [],
+        dnsSearch: [String] = [],
+        dnsOptions: [String] = [],
         resources: Resources? = nil,
         dependsOn: [String] = [],
         extensions: [String: ExtensionValue] = [:]
@@ -145,6 +153,9 @@ public struct Service: Sendable, Hashable, Identifiable {
         self.mounts = mounts
         self.labels = labels
         self.networks = networks
+        self.dns = dns
+        self.dnsSearch = dnsSearch
+        self.dnsOptions = dnsOptions
         self.resources = resources
         self.dependsOn = dependsOn
         self.extensions = extensions
@@ -181,6 +192,11 @@ extension Service {
         for mount in mounts.map(\.description).sorted() { lines.append("mount=\(mount)") }
         for key in labels.keys.sorted() { lines.append("label.\(key)=\(labels[key] ?? "")") }
         for network in networks.sorted() { lines.append("network=\(network)") }
+        // Resolver settings are ordered as written: a nameserver list is a preference order,
+        // and sorting it would make two different configurations hash the same.
+        for nameserver in dns { lines.append("dns=\(nameserver)") }
+        for domain in dnsSearch { lines.append("dns_search=\(domain)") }
+        for option in dnsOptions { lines.append("dns_opt=\(option)") }
         if let resources {
             if let cpus = resources.cpus { lines.append("cpus=\(cpus)") }
             if let memory = resources.memoryBytes { lines.append("memory=\(memory)") }

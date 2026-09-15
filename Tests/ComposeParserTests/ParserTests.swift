@@ -37,6 +37,12 @@ struct FileParsingTests {
             Service.Port(hostPort: 8080, containerPort: 8080),
             Service.Port(hostIP: "127.0.0.1", hostPort: 9229, containerPort: 9229),
         ])
+        // Nameservers keep the order they were written in, because that is a preference order.
+        #expect(api.dns == ["1.1.1.1", "8.8.8.8"])
+        // The short form is a bare string, and means a list of one.
+        #expect(api.dnsSearch == ["example.internal"])
+        #expect(api.dnsOptions == ["ndots:1"])
+        #expect(db.dns.isEmpty)
 
         let web = try #require(file.services["web"])
         #expect(web.containerName == "shop-front")
@@ -128,7 +134,7 @@ struct FindingTests {
         #expect(byKey["user"]?.first?.severity == .behavioural)
         #expect(byKey["entrypoint"]?.first?.support.severity == .behavioural)
         #expect(byKey["healthcheck"] != nil)
-        #expect(byKey["dns"] != nil)
+        #expect(byKey["privileged"] != nil)
 
         // Cosmetic keys are reported too, and do not block.
         let platform = try #require(byKey["platform"]?.first)

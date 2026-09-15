@@ -144,6 +144,11 @@ public struct CreateOperation: Sendable, Equatable {
     public let ports: [Port]
     public let networkName: String
     public let labels: [String: String]
+    /// Nameservers in preference order. Empty means the runtime picks, which it only does when
+    /// a resolver configuration is present at all.
+    public let dns: [String]
+    public let dnsSearch: [String]
+    public let dnsOptions: [String]
     public let cpus: Double?
     public let memoryBytes: UInt64?
 
@@ -158,6 +163,9 @@ public struct CreateOperation: Sendable, Equatable {
         ports: [Port],
         networkName: String,
         labels: [String: String],
+        dns: [String] = [],
+        dnsSearch: [String] = [],
+        dnsOptions: [String] = [],
         cpus: Double?,
         memoryBytes: UInt64?
     ) {
@@ -171,6 +179,9 @@ public struct CreateOperation: Sendable, Equatable {
         self.ports = ports
         self.networkName = networkName
         self.labels = labels
+        self.dns = dns
+        self.dnsSearch = dnsSearch
+        self.dnsOptions = dnsOptions
         self.cpus = cpus
         self.memoryBytes = memoryBytes
     }

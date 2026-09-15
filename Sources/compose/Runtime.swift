@@ -283,11 +283,15 @@ enum Runtime {
         // empty, so leaving this nil skips that and every lookup inside the container falls
         // back to [::1]:53 and is refused. `container run` sends one even with no --dns flag,
         // because its flags default to empty rather than absent.
+        //
+        // Naming nameservers explicitly matters on a project network, where the gateway does
+        // not answer: a service that has to resolve anything needs `dns:` in the file until
+        // the runtime serves DNS on networks it did not create itself.
         configuration.dns = ContainerConfiguration.DNSConfiguration(
-            nameservers: [],
+            nameservers: operation.dns,
             domain: nil,
-            searchDomains: [],
-            options: []
+            searchDomains: operation.dnsSearch,
+            options: operation.dnsOptions
         )
         configuration.networks = [
             AttachmentConfiguration(

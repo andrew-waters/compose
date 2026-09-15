@@ -583,6 +583,9 @@ public enum Planner {
             ports: ports,
             networkName: networkName,
             labels: project.labels(for: service),
+            dns: service.dns,
+            dnsSearch: service.dnsSearch,
+            dnsOptions: service.dnsOptions,
             cpus: service.resources?.cpus,
             memoryBytes: service.resources?.memoryBytes
         )
