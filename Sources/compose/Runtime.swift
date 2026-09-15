@@ -277,6 +277,18 @@ enum Runtime {
         if let memory = operation.memoryBytes {
             configuration.resources.memoryInBytes = memory
         }
+        // Always send a resolver configuration, even an empty one. A container created with
+        // none comes up with no /etc/resolv.conf at all: the runtime fills in the network's
+        // own nameserver only when a configuration is present and its nameserver list is
+        // empty, so leaving this nil skips that and every lookup inside the container falls
+        // back to [::1]:53 and is refused. `container run` sends one even with no --dns flag,
+        // because its flags default to empty rather than absent.
+        configuration.dns = ContainerConfiguration.DNSConfiguration(
+            nameservers: [],
+            domain: nil,
+            searchDomains: [],
+            options: []
+        )
         configuration.networks = [
             AttachmentConfiguration(
                 network: operation.networkName,
