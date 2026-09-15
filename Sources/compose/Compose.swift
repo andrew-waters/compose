@@ -14,7 +14,7 @@ struct Compose: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "compose",
         abstract: "Bring a set of services up and down from a compose file.",
-        version: "0.1.0",
+        version: composeVersion,
         subcommands: [Up.self, Down.self]
     )
 }
