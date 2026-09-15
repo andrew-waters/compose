@@ -142,11 +142,21 @@ jobs:
 
       # The tag message is the release title. Tags here carry a one-line summary written for
       # a human, which is a better headline than the commit subject underneath it.
+      #
+      # Read it from the API rather than from git. actions/checkout materialises a tag as a
+      # lightweight ref pointing straight at the commit, so `git tag -l` with
+      # `%(contents:subject)` finds no annotation and quietly falls back to the commit
+      # subject. That is how 0.3.0 came out titled after a merge commit. The API answers with
+      # the tag object however the local ref was made, and says so when there is not one.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          title=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")
+          title=""
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq '.object.type')" = "tag" ]; then
+            sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq '.object.sha')
+            title=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq '.message' | head -1)
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --title "${title:-$GITHUB_REF_NAME}" \
             --generate-notes \
