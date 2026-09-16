@@ -13,11 +13,11 @@ import Foundation
 /// containers are the record.
 public struct ProjectIdentity: Sendable, Hashable {
     /// The project a container belongs to.
-    public static let projectLabel = "com.container-compose.project"
+    public static let projectLabel = "com.compose.project"
     /// The key the container's service sits under in the file.
-    public static let serviceLabel = "com.container-compose.service"
+    public static let serviceLabel = "com.compose.service"
     /// The hash of the resolved service at the moment the container was created.
-    public static let hashLabel = "com.container-compose.hash"
+    public static let hashLabel = "com.compose.hash"
 
     public let name: String
 
