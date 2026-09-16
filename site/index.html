@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>compose - Docker Compose for Apple's container runtime, as a plugin</title>
+  <meta name="description" content="A container compose plugin for Apple's container runtime. `container compose up` and `down`, installed under the real CLI. Honours what the runtime can do, and refuses by name what it cannot." />
+  <meta property="og:title" content="compose - Docker Compose for Apple's container runtime" />
+  <meta property="og:description" content="Apple ruled compose out of container upstream and pointed at plugins instead. This is that plugin: container compose up, under the real CLI." />
+  <link rel="icon" href="logo-mark.svg" type="image/svg+xml" />
+  <script>(function(){var t;try{t=localStorage.getItem('theme')}catch(e){}if(!t&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)t='dark';if(t==='dark')document.documentElement.setAttribute('data-theme','dark');})();</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body id="top">
+  <a class="promo" href="https://github.com/andrew-waters/orchard">
+    <img src="orchard-mark.svg" alt="" width="18" height="18" />
+    <span class="promo-text"><strong>Orchard</strong> is an easier way to manage your compose stacks.</span>
+    <span class="promo-go">Take a look</span>
+  </a>
+  <header>
+    <div class="wrap nav">
+      <a href="#top" class="brand" aria-label="compose">
+        <img src="logo-mark.svg" alt="" width="22" height="22" />
+        <span class="name">compose<i>.</i></span>
+      </a>
+      <nav class="nav-links">
+        <a class="nav-link" href="#scope">Compare</a>
+        <a class="nav-link" href="#install">Install</a>
+        <a class="nav-link" href="https://github.com/andrew-waters/compose">GitHub</a>
+        <a class="button" href="https://github.com/andrew-waters/compose/releases/latest">Download</a>
+        <button id="theme-toggle" class="theme-btn" aria-label="Toggle dark and light theme">&#9728;&#65038;</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <h1>Compose,<br /><em>for Apple Containers</em></h1>
+        <div class="snippet-row">
+          <div class="snippet-step">
+            <p class="eyebrow mono-xs">Bring a stack up</p>
+            <div class="snippet">
+<pre><code><span class="p">container compose up</span></code></pre>
+              <button type="button" onclick="navigator.clipboard.writeText('container compose up'); this.textContent='Copied'; setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+            </div>
+          </div>
+          <div class="snippet-step">
+            <p class="eyebrow mono-xs">Install the plugin</p>
+            <div class="snippet">
+<pre><code><span class="p">git clone https://github.com/andrew-waters/compose</span>
+<span class="p">cd compose</span>
+<span class="p">make build &amp;&amp; sudo make install</span></code></pre>
+              <button type="button" onclick="navigator.clipboard.writeText('git clone https://github.com/andrew-waters/compose\ncd compose\nmake build &amp;&amp; sudo make install'); this.textContent='Copied'; setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+            </div>
+          </div>
+        </div>
+        <p class="sub">If you are subscribed to <a href="https://github.com/apple/container/issues/230">#230</a>,
+          <a href="https://github.com/apple/container/issues/1846">#1846</a> or
+          <a href="https://github.com/apple/container/pull/239">#239</a>, you have been waiting for the runtime to grow
+          a compose command. It is not going to. Compose is out of scope upstream, and plugins are the route
+          container&rsquo;s maintainers pointed at instead.</p>
+        <p class="sub">So this is a plugin. It installs into container&rsquo;s plugin directory, which makes
+          <code>container compose up</code> the real command under the real CLI. Not a second binary with its own name,
+          its own flags and its own idea of what a project is.</p>
+
+      </div>
+    </section>
+
+
+    <section id="scope" class="alt">
+      <div class="wrap">
+        <h2 class="ta-center">Coming from Docker Compose</h2>
+
+        <div class="matrix-wrap lined">
+          <span class="dot dot--tl"></span><span class="dot dot--tr"></span><span class="dot dot--bl"></span><span class="dot dot--br"></span>
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th scope="col">Capability</th>
+                <th scope="col">Docker Compose</th>
+                <th scope="col"><code>container compose</code></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="band"><th colspan="3" scope="colgroup">Carries over unchanged</th></tr>
+              <tr>
+                <th scope="row"><code>image</code>, <code>build</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">args, target and dockerfile included; the build
+                  itself shells out to <code>container build</code></span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>environment</code>, <code>env_file</code>, <code>.env</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">interpolation included, with a line and column
+                  on every error</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>command</code>, <code>working_dir</code>, <code>labels</code>, <code>container_name</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>ports</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">short and long form; a clash with a running
+                  container stops the plan before anything is created</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Bind mounts under <code>volumes</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>deploy.resources</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">a VM cannot have half a core, so cpus round
+                  up</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>depends_on</code>, list form</th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">dependencies start first</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>dns</code>, <code>dns_search</code>, <code>dns_opt</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Project naming, <code>-f</code>, <code>-p</code>, <code>--dry-run</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">name from the file, then the directory</span></td>
+              </tr>
+
+              <tr class="band"><th colspan="3" scope="colgroup">Works differently here</th></tr>
+              <tr>
+                <th scope="row">Reaching a service by name</th>
+                <td><span class="m m--yes">yes</span> <span class="why"><code>db</code></span></td>
+                <td><span class="m m--part">partial</span> <span class="why">hostnames are unique per machine, so it is
+                  <code>myapp-db</code> rather than <code>db</code>
+                  (<a href="https://github.com/apple/container/issues/1809">#1809</a>)</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>depends_on</code> conditions</th>
+                <td><span class="m m--yes">yes</span> <span class="why"><code>service_healthy</code></span></td>
+                <td><span class="m m--soon">not yet</span> <span class="why">order only; waiting for ready needs health in the
+                  runtime (<a href="https://github.com/apple/container/issues/1502">#1502</a>)</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>healthcheck</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--soon">not yet</span> <span class="why">a container cannot report health, so
+                  probes would have to run here</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Named volumes</th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--soon">not yet</span> <span class="why">bind mounts today</span></td>
+              </tr>
+              <tr>
+                <th scope="row">Several networks per service</th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--soon">not yet</span> <span class="why">one attachment per container</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>entrypoint</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--soon">not yet</span> <span class="why">the create surface overrides cmd, not
+                  entrypoint</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>profiles</code>, <code>include</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--soon">not yet</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>pull_policy</code>, <code>platform</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--part">partial</span> <span class="why">an image is pulled when it is missing, and
+                  everything on this stack is linux/arm64</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>ps</code>, <code>logs</code>, <code>exec</code>, <code>stop</code>, <code>start</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--soon">not yet</span> <span class="why">only <code>up</code> and <code>down</code> here, with
+                  container&rsquo;s own <code>ls</code> and <code>logs</code> covering the rest meanwhile</span></td>
+              </tr>
+
+              <tr class="band"><th colspan="3" scope="colgroup">Not possible on this runtime</th></tr>
+              <tr>
+                <th scope="row"><code>restart</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--no">no</span> <span class="why">nothing restarts a container that exits
+                  (<a href="https://github.com/apple/container/issues/2142">#2142</a>)</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>user</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--no">no</span> <span class="why">the create surface cannot set the process
+                  user</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>cap_add</code>, <code>cap_drop</code>, <code>privileged</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--no">no</span> <span class="why">capabilities are not settable and there is no
+                  privileged mode</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>devices</code>, <code>tmpfs</code>, <code>ulimits</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--no">no</span> <span class="why">no device passthrough, no tmpfs mounts, no
+                  settable limits</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>secrets</code>, <code>configs</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--no">no</span> <span class="why">container mounts neither</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>extra_hosts</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--no">no</span> <span class="why">the hosts file is not writable at create</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>network_mode</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--no">no</span> <span class="why">only user-defined networks are attachable</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="req">Nothing in the last band is silently dropped. Each one refuses the file by name, on the line it
+          sits on. The middle band is where a contribution lands today.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="split-header">
+          <h2>What you actually get<em>when you install it</em></h2>
+          <p>Not a wrapper that shells out to <code>container run</code> in a loop. A parser, a dependency graph and a
+            planner, with the runtime call at the very end.</p>
+        </div>
+        <div class="feature-frame">
+          <div class="feature-grid">
+            <div class="feature-item">
+              <div class="feature-item-content">
+                <p class="eyebrow mono-xs">Plugin, not binary</p>
+                <h3>The real command</h3>
+                <p><code>container compose up</code>, <code>container compose down</code>. It lands in container&rsquo;s
+                  plugin directory and appears in <code>container --help</code> beside everything else. Your muscle
+                  memory, your scripts and your CI all keep working the way they read.</p>
+              </div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-item-content">
+                <p class="eyebrow mono-xs">No silent drops</p>
+                <h3>It refuses what it cannot honour</h3>
+                <p>Every compose key is classified: honoured, deferred, or impossible until the runtime grows a
+                  feature. Anything behavioural that would not happen stops the run, named, with the line it is on.
+                  Nothing is quietly ignored.</p>
+              </div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-item-content">
+                <p class="eyebrow mono-xs">Idempotent</p>
+                <h3>Containers are the only state</h3>
+                <p>There is no state file to drift or delete. A second <code>up</code> compares each service against
+                  the hash stamped on the container it produced, then creates, starts, leaves alone, recreates or
+                  removes accordingly.</p>
+              </div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-item-content">
+                <p class="eyebrow mono-xs">Testable</p>
+                <h3>The planner is a pure function</h3>
+                <p>A compose file plus a snapshot of what exists goes in; an ordered list of operations comes out. No
+                  subprocesses, no XPC, no daemon. Ordering and reconciliation are where compose tools go subtly
+                  wrong, and here they are covered by tests that start nothing.</p>
+              </div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-item-content">
+                <p class="eyebrow mono-xs">Built to be embedded</p>
+                <h3>A package, not just a binary</h3>
+                <p>The model, the parser and the planner ship as a Swift package with no runtime client in them. A GUI
+                  can link it and execute plans over XPC directly, without shelling out to this plugin and without the
+                  plugin being installed at all.</p>
+              </div>
+            </div>
+            <div class="feature-item">
+              <div class="feature-item-content">
+                <p class="eyebrow mono-xs">One dependency</p>
+                <h3>Yams, and nothing else</h3>
+                <p>The libraries depend on the YAML parser <code>apple/container</code> already uses, so linking them
+                  adds nothing to your graph. It reports a line and column for every node, which is what lets a
+                  refusal point at the line it is refusing.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="term">
+          <div class="term-bar">
+            <span class="lights"><i></i><i></i><i></i></span>
+            <span class="mono-xs">~/work/myapp</span>
+          </div>
+<pre><code><span class="c">container compose up</span>
+<span class="b">myapp</span>  <span class="d">./compose.yaml, 3 services</span>
+  db   create  <span class="d">no container exists</span>
+  api  create  <span class="d">no container exists</span>
+  web  create  <span class="d">no container exists</span>
+<span class="d">[1/9]</span> create network myapp
+<span class="d">[2/9]</span> pull postgres:17
+<span class="d">[3/9]</span> create container myapp-db
+<span class="d">[4/9]</span> start myapp-db
+<span class="d">[5/9]</span> build myapp-api from /Users/you/work/myapp/api
+<span class="d">[6/9]</span> create container myapp-api
+<span class="d">[7/9]</span> start myapp-api
+<span class="d">[8/9]</span> create container myapp-web
+<span class="d">[9/9]</span> start myapp-web</code></pre>
+        </div>
+      </div>
+    </section>
+
+
+    <section class="alt">
+      <div class="wrap">
+        <div class="split-header">
+          <h2>It would rather stop<em>than lie to you</em></h2>
+        </div>
+        <div class="term">
+          <div class="term-bar">
+            <span class="lights"><i></i><i></i><i></i></span>
+            <span class="mono-xs">a file this stack cannot honour</span>
+          </div>
+<pre><code><span class="c">container compose up</span>
+<span class="b">myapp</span>  <span class="d">./compose.yaml, 4 services</span>
+<span class="r">error:</span> ./compose.yaml asks for 2 things this cannot do
+  8:14: `restart` in service `db` is not honoured: container has no restart policy;
+        a container that exits stays exited
+  15:11: `user` in service `api` is not honoured: the create surface cannot set the
+         process user
+<span class="r">error:</span> nothing was created. Remove or change those keys and run again.</code></pre>
+        </div>
+        <p class="req">Keys that cost nothing to ignore, such as an obsolete <code>version</code>, are printed as
+          notes and stepped over. The difference is a severity carried per key, not a judgement made at the moment of
+          refusal.</p>
+      </div>
+    </section>
+
+
+    <section>
+      <div class="wrap">
+        <div class="split-header">
+          <h2>Three things to know<em>before you install it</em></h2>
+        </div>
+        <div class="callouts">
+          <div class="callout warn">
+            <h3>Nothing waits for ready</h3>
+            <p><code>up</code> starts dependencies before dependents, but a container cannot report health, so it
+              cannot wait for one to become ready. Until
+              <a href="https://github.com/apple/container/issues/1502">#1502</a> lands, your app still needs to retry
+              its first connection.</p>
+          </div>
+          <div class="callout warn">
+            <h3>A service answers to <code>&lt;project&gt;-&lt;service&gt;</code></h3>
+            <p>Hostnames have to be unique across every container on the machine, so <code>db</code> is reachable as
+              <code>myapp-db</code>, not <code>db</code>. Compose&rsquo;s own naming needs per-network namespacing:
+              <a href="https://github.com/apple/container/issues/1809">#1809</a>.</p>
+          </div>
+          <div class="callout info">
+            <h3>Upgrading container wipes plugins</h3>
+            <p>The installer clears the plugin directory on every upgrade
+              (<a href="https://github.com/apple/container/issues/1617">#1617</a>), so expect to reinstall afterwards.
+              Keep the two lines above to hand; an installer that asks for admin once is the fix, and it is not here
+              yet.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="alt">
+      <div class="wrap">
+        <h2 class="ta-center">Install it</h2>
+        <p class="lede ta-center">A plugin is a directory with a config file and a binary. The plugin directory is
+          root owned, which is what the <code>sudo</code> is for.</p>
+        <div class="install-grid lined">
+          <span class="dot dot--tl"></span><span class="dot dot--tr"></span><span class="dot dot--bl"></span><span class="dot dot--br"></span>
+          <div class="install-cell">
+            <p class="eyebrow mono-xs">Recommended</p>
+            <h3>From source</h3>
+            <p>Swift 6.2 is all it takes. Clone
+              <a href="https://github.com/andrew-waters/compose">the repo</a>, then build and install: the first
+              stamps the version from the tag, the second puts the plugin where the CLI looks for it.</p>
+            <pre>make build
+sudo make install</pre>
+          </div>
+          <div class="install-cell">
+            <p class="eyebrow mono-xs">Prebuilt</p>
+            <h3>From a release</h3>
+            <p>The tarball is the plugin directory exactly as it installs, so unpacking it into place is the whole
+              install. Not notarised yet, so macOS may quarantine it on the way in.</p>
+            <pre>tar -xzf compose-*.tar.gz
+sudo cp -R compose \
+  /usr/local/libexec/container-plugins/</pre>
+          </div>
+          <div class="install-cell">
+            <p class="eyebrow mono-xs">Then check</p>
+            <h3>Confirm the CLI found it</h3>
+            <p>A plugin the CLI cannot see fails quietly, with no error worth reading. One command settles it: the
+              abstract and both subcommands should print.</p>
+            <pre>container compose --help</pre>
+          </div>
+        </div>
+        <p class="req">Requires an Apple silicon Mac on macOS 26 and
+          <a href="https://github.com/apple/container">apple/container</a> 1.4.1 or later.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap ask">
+        <h2>One of these, not five</h2>
+        <p>Everyone who wanted compose on this runtime went and built a piece of it. That is four or five parsers, four
+          or five planners, and four or five sets of the same subtle ordering bugs, all against a runtime that is
+          still moving underneath them.</p>
+        <p>This is the version built to be shared: a plugin for the CLI, a package for anyone&rsquo;s GUI, and a
+          coverage table that says plainly what is missing. If you have been following those threads, the most useful
+          thing you can do now is bring your compose file, find the key it refuses, and file it.</p>
+        <nav class="cta">
+          <a class="button button--thick" href="https://github.com/andrew-waters/compose/issues">Open an issue</a>
+          <a class="button button--thick button--secondary" href="https://github.com/andrew-waters/compose">Read the source</a>
+        </nav>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap foot">
+      <div>MIT licensed &middot; a compose plugin for Apple&rsquo;s container runtime</div>
+      <div>Built by <a href="https://andon.dev">andon.dev</a></div>
+    </div>
+  </footer>
+
+  <script src="theme.js" defer></script>
+</body>
+</html>
