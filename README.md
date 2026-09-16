@@ -1,20 +1,19 @@
 # Compose (for Apple Containers)
 
-Container compose is built as a plugin for [apple/container
-runtime](https://github.com/apple/container) to bring Docker Compose ergonomics to Apple's
-container runtime.
+Container compose is a plugin for [apple/container](https://github.com/apple/container) that
+brings Docker Compose ergonomics to Apple's container runtime.
 
 Unlike earlier community efforts, which tend to be standalone binaries, this is an actual
-_plugin_ which can be installed to hook into the `container` CLI and allows you to use
-commands like:
+_plugin_, installed into the `container` CLI, so the commands are:
 
 ```
 container compose up
 container compose down
 ```
 
-It can be run in standalone mode (on the CLI) or as part of the [Orchard UI App for
-containers](https://github.com/andrew-waters/orchard).
+It runs standalone on the CLI, and the same package backs the Compose tab in the
+[Orchard](https://github.com/andrew-waters/orchard) app for containers, so a project brought
+up in the terminal and one brought up in the app are the same project.
 
 I would also encourage the community to rally around a single solution, contribute to it to
 bring it up to spec with all features missing from Docker and for other UIs to build on so
@@ -32,7 +31,7 @@ integration.
 So compose on this stack has to be built from scratch, outside the project, by someone who
 wants it. That is what this is.
 
-## What it will be
+## How it fits together
 
 Three pieces, sharing one implementation:
 
@@ -41,10 +40,10 @@ Three pieces, sharing one implementation:
   operations. Pure logic: no subprocesses, no XPC, testable without a running daemon.
 - **A `container compose` plugin.** A thin binary over that package, installed into
   container's plugin directory, so `container compose up` works from the terminal.
-- **A tab in [Orchard](https://github.com/andrew-waters/orchard).** Orchard links the
-  package directly and executes plans over the same XPC path it already uses to create
-  containers and networks, so the GUI never shells out and never depends on the plugin being
-  installed.
+- **A Compose tab in [Orchard](https://github.com/andrew-waters/orchard).** Orchard links
+  this package over SwiftPM and executes plans over the same XPC path it already uses to
+  create containers and networks, so the GUI never shells out and does not need the plugin
+  installed at all.
 
 The planner being a pure function is the reason for this shape. Ordering and reconciliation
 are where compose tools get subtly wrong, and both are testable here without starting a
@@ -52,18 +51,20 @@ single container.
 
 ## Scope
 
-The dividing line for v1 is what container's own create surface can already express.
+The dividing line is what container's own create surface can already express.
 
 **Supported:** `image`, `build`, `container_name`, `command`, `environment`, `env_file`,
-`working_dir`, `ports`, bind `volumes`, `labels`, `networks`, `deploy.resources`, and
-`depends_on` in its list form.
+`working_dir`, `ports`, bind `volumes`, `labels`, `networks`, `dns`, `dns_search`,
+`dns_opt`, `deploy.resources`, and `depends_on` in its list form.
 
 **Not yet:** `entrypoint`, named `volumes`, attaching to multiple networks, `profiles`,
-`healthcheck`, and `depends_on` with conditions.
+`include`, `healthcheck`, and `depends_on` with conditions. `pull_policy` and `platform` are
+read but not honoured: an image is pulled when it is missing, and everything on this stack is
+linux/arm64.
 
 **Not possible today:** `restart`, `user`, `cap_add`, `devices`, `tmpfs`, `ulimits`,
-`secrets`, `configs`, `extra_hosts`. These need runtime support container does not have.
-Restart policy is tracked upstream at
+`secrets`, `configs`, `extra_hosts`, `privileged`, `network_mode`. These need runtime support
+container does not have. Restart policy is tracked upstream at
 [#2142](https://github.com/apple/container/issues/2142), health at
 [#1502](https://github.com/apple/container/issues/1502).
 
@@ -81,7 +82,16 @@ Compose's own naming needs per-network namespacing, which is
 
 ## Using it
 
-Build the plugin and install it where the `container` CLI looks for plugins:
+Every release ships the plugin directory built and packaged exactly as it is installed, so
+unpacking it into container's plugin directory is the whole install:
+
+```
+tar -xzf compose-<version>-macos-arm64.tar.gz
+sudo mkdir -p /usr/local/libexec/container-plugins
+sudo cp -R compose /usr/local/libexec/container-plugins/
+```
+
+Or build it yourself:
 
 ```
 make build
@@ -90,9 +100,8 @@ sudo make install
 
 The plugin directory is root owned, which is what the `sudo` is for. The container installer
 wipes that directory on every upgrade
-([apple/container#1617](https://github.com/apple/container/issues/1617)), so expect to run
-`sudo make install` again after updating container. Orchard will eventually do this for you,
-behind an admin prompt, which is the route that actually solves the wiping.
+([apple/container#1617](https://github.com/apple/container/issues/1617)), so expect to
+install again after updating container.
 
 Then, in a directory with a `compose.yaml`:
 
@@ -102,7 +111,8 @@ container compose up --dry-run       # work out the plan, print it, change nothi
 container compose down               # stop and remove it all again
 ```
 
-`up` and `down`, matching compose.
+`up` and `down`, matching compose. There are no other verbs yet: container's own `ls`,
+`logs` and `exec` cover the rest meanwhile.
 
 Both verbs take `-f` to point at a file elsewhere, `-p` to name the project (it otherwise
 comes from the file's `name`, then from the directory), and `--dry-run`. `up` also takes
@@ -129,6 +139,21 @@ error: nothing was created.
 Keys that cost nothing to ignore, such as an obsolete `version`, are printed as notes and
 stepped over. The difference is a severity carried per key, not a judgement made at the
 point of refusal.
+
+## Using it from Orchard
+
+[Orchard](https://github.com/andrew-waters/orchard) is a native macOS app for managing
+containers, machines and local AI models on `apple/container`, and its Compose tab is built
+on this package:
+
+```
+brew install orchard
+```
+
+It reads a compose file, shows what it found and what it would ignore before anything runs,
+and then executes the same plans this plugin does. The plugin does not have to be installed
+for that. Source and releases are at
+[andrew-waters/orchard](https://github.com/andrew-waters/orchard).
 
 ## Building
 
