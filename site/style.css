@@ -1,0 +1,448 @@
+/* compose site design system.
+   The same language as the Orchard site: Figtree for text, JetBrains Mono for
+   eyebrows and terminal, blue #0044cc as the single hue, dashed hairlines and
+   corner-dotted "blueprint" containers. The screenshot machinery is replaced by
+   terminal blocks, because there is nothing to photograph in a CLI. */
+
+:root {
+  /* Spacing scale (4px base) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px;
+  --s8: 32px; --s10: 40px; --s12: 48px; --s14: 56px; --s16: 64px; --s18: 72px;
+  --radius-s: 4px;
+  --radius: 6px;
+  --radius-xl: 10px;
+  --max-width: 1128px;
+
+  /* Warm light palette */
+  --tan-bg: #fafaf8;
+  --bg-0: #fff;
+  --bg-0-hover: #f5f5f5;
+  --bg-1: #fafafa;
+  --bg-2: #f5f5f5;
+  --bg-3: #ebebeb;
+
+  --primary-blue-bg: #0044cc;
+  --primary-blue-bg-hover: #0036a3;
+
+  --neutral-fg-1: #141412;
+  --neutral-fg-2: #52504a;
+  --neutral-fg-3: #7a786e;
+
+  --neutral-outline-1: #ebebeb;
+  --neutral-outline-2: #e0e0e0;
+  --neutral-outline-3: #ccc;
+
+  --primary-fg: #0044cc;
+  --primary-badge-bg: #e5ecfa;
+  --primary-badge-outline: #ccdaf5;
+
+  --color-success: #006633;
+  --color-success-outline: #cce6d9;
+  --color-success-surface: #e5f2ec;
+
+  --color-warning: #997a00;
+  --color-warning-outline: #ffe066;
+  --color-warning-surface: #fff5cc;
+
+  --color-danger: #b3261e;
+  --color-danger-outline: #f2d4d2;
+  --color-danger-surface: #fbeceb;
+
+  --primary-surface: #f4f7fd;
+  --header-bg: rgba(250, 250, 248, 0.9);
+  color-scheme: light;
+
+  --button-neutral-shadow:
+    0px -2px 0px 0px rgba(0, 0, 0, 0.04) inset,
+    0px 0px 0px 1px rgba(0, 0, 0, 0.12),
+    0px 1px 2px 0px rgba(0, 0, 0, 0.08),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.08);
+  --button-primary-shadow:
+    0px 0.75px 0px 0px rgba(255, 255, 255, 0.2) inset,
+    0px 0px 0px 1px var(--primary-blue-bg-hover),
+    0px 1px 2px 0px rgba(0, 0, 0, 0.32),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.16);
+  --dot-shadow:
+    0 -1px 0 0 rgba(0, 0, 0, 0.08) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.16),
+    0 1px 2px 0 rgba(0, 0, 0, 0.08);
+}
+
+/* Dark theme: the same warm palette inverted. A head script resolves
+   localStorage/system preference into data-theme before first paint. */
+[data-theme="dark"] {
+  --tan-bg: #141412;
+  --bg-0: #1c1c1a;
+  --bg-0-hover: #232321;
+  --bg-1: #191917;
+  --bg-2: #1f1f1d;
+  --bg-3: #272725;
+
+  --neutral-fg-1: #fafaf8;
+  --neutral-fg-2: #a3a093;
+  --neutral-fg-3: #7a786e;
+
+  --neutral-outline-1: #272725;
+  --neutral-outline-2: #353533;
+  --neutral-outline-3: #52504a;
+
+  --primary-fg: #99b4eb;
+  --primary-badge-bg: #001b52;
+  --primary-badge-outline: #0036a3;
+
+  --color-success: #99ccb3;
+  --color-success-outline: #006633;
+  --color-success-surface: #00331a;
+
+  --color-warning: #ffe066;
+  --color-warning-outline: #665200;
+  --color-warning-surface: #332900;
+
+  --color-danger: #f2b8b5;
+  --color-danger-outline: #8c1d18;
+  --color-danger-surface: #2b1210;
+
+  --primary-surface: #10182b;
+  --header-bg: rgba(20, 20, 18, 0.88);
+  color-scheme: dark;
+
+  --button-neutral-shadow:
+    0px -2px 0px 0px rgba(0, 0, 0, 0.4) inset,
+    0px 0px 0px 1px rgba(255, 255, 255, 0.16),
+    0px 1px 2px 0px rgba(0, 0, 0, 0.16),
+    0px 2px 4px 0px rgba(0, 0, 0, 0.16);
+  --dot-shadow:
+    0 -1px 0 0 #000 inset,
+    0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 1px 2px 0 rgba(0, 0, 0, 0.16),
+    0 2px 4px 0 rgba(0, 0, 0, 0.16);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 16px;
+  background: var(--tan-bg);
+  color: var(--neutral-fg-1);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a { color: var(--primary-fg); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: var(--max-width); margin: 0 auto; padding: 0 var(--s5); }
+
+.mono-xs {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---------- Promo banner ---------- */
+/* Sits above the sticky header rather than inside it, so it scrolls away once and
+   the nav keeps the top edge for the rest of the page. */
+.promo {
+  display: flex; align-items: center; justify-content: center; gap: var(--s3);
+  padding: var(--s2) var(--s5);
+  background: var(--primary-surface);
+  border-bottom: 1px solid var(--primary-badge-outline);
+  color: var(--neutral-fg-2); font-size: 13px; line-height: 1.4;
+  text-decoration: none;
+}
+.promo:hover { background: var(--primary-badge-bg); text-decoration: none; }
+.promo img { width: 18px; height: 18px; border-radius: var(--radius-s); flex: none; }
+.promo strong { color: var(--neutral-fg-1); font-weight: 600; }
+.promo-text { min-width: 0; }
+.promo-go { flex: none; color: var(--primary-fg); font-weight: 500; white-space: nowrap; }
+.promo-go::after { content: " \2192"; }
+
+/* ---------- Header ---------- */
+header {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--header-bg);
+  backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--neutral-outline-1);
+}
+.nav { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.brand { display: inline-flex; align-items: center; gap: var(--s2); text-decoration: none; }
+.brand:hover { text-decoration: none; }
+.brand svg { width: 22px; height: 22px; display: block; }
+.brand .name { font-weight: 600; font-size: 17px; letter-spacing: -0.3px; color: var(--neutral-fg-1); }
+.brand .name i { font-style: normal; color: #16a34a; }
+.nav-links { display: flex; align-items: center; gap: var(--s5); }
+.nav-links a.nav-link { color: var(--neutral-fg-2); font-size: 14px; font-weight: 500; }
+.nav-links a.nav-link:hover { color: var(--neutral-fg-1); text-decoration: none; }
+.theme-btn {
+  background: none; border: 0; cursor: pointer; color: var(--neutral-fg-2);
+  font-size: 15px; line-height: 1; padding: var(--s1);
+}
+.theme-btn:hover { color: var(--neutral-fg-1); }
+
+/* ---------- Buttons ---------- */
+.button {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  background-color: var(--primary-blue-bg); color: #fff;
+  border-radius: var(--radius); padding: var(--s1) var(--s3);
+  font-size: 14px; font-weight: 500; text-decoration: none;
+  box-shadow: var(--button-primary-shadow);
+}
+.button:hover { background-color: var(--primary-blue-bg-hover); text-decoration: none; }
+.button--secondary {
+  background-color: var(--bg-0); color: var(--neutral-fg-1);
+  box-shadow: var(--button-neutral-shadow);
+}
+.button--secondary:hover { background-color: var(--bg-0-hover); }
+.button--thick { padding: var(--s2) var(--s4); font-size: 15px; font-weight: 600; }
+.button--pill { padding: var(--s1) var(--s3); border-radius: var(--s8); }
+
+/* ---------- Hero ---------- */
+.hero { padding: var(--s16) 0 var(--s12); }
+.hero h1 {
+  font-size: clamp(34px, 6vw, 56px);
+  line-height: 1.04; letter-spacing: -1.6px;
+  font-weight: 600; margin: 0 0 var(--s6);
+}
+.hero h1 em { font-style: normal; color: var(--neutral-fg-3); display: block; }
+.hero p.sub {
+  font-size: 17px; color: var(--neutral-fg-2); margin: 0; max-width: 540px;
+}
+.hero p.sub + p.sub { margin-top: var(--s4); }
+.cta { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
+
+/* Multi-line sibling of .brew: the same card, a prompt on every line, one copy
+   button for the lot. Sized to its content so it stays a snippet, not a panel. */
+/* Two labelled steps stacked on the left, each card sized to its own commands. */
+.snippet-row { display: flex; flex-direction: column; gap: var(--s6); margin: 0 0 var(--s10); }
+/* Full-width steps, each holding an inline-flex card that shrinks to its own
+   commands. Sizing the step to its content instead lets a long clone URL push the
+   step past the viewport on a phone, because a shrink-to-fit flex item is free to
+   overflow its container. */
+.snippet-step { width: 100%; min-width: 0; }
+.snippet-step .eyebrow { margin: 0 0 var(--s3); }
+.snippet {
+  display: inline-flex; align-items: flex-start; gap: var(--s5);
+  max-width: 100%; margin: 0;
+  background: var(--bg-0); border: 1px solid var(--neutral-outline-2);
+  border-radius: var(--radius); box-shadow: var(--button-neutral-shadow);
+  padding: var(--s4) var(--s3) var(--s4) var(--s5);
+}
+.snippet pre {
+  margin: 0; min-width: 0; overflow-x: auto;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px; line-height: 1.9; color: var(--neutral-fg-1);
+}
+.snippet .p::before { content: "$ "; color: var(--neutral-fg-3); }
+.snippet button {
+  flex: none; background: var(--bg-2); border: 0; border-radius: var(--radius-s);
+  color: var(--neutral-fg-2); cursor: pointer; padding: var(--s1) var(--s2);
+  font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px;
+}
+.snippet button:hover { background: var(--bg-3); color: var(--neutral-fg-1); }
+
+/* Blueprint container: dashed frame with corner dots */
+.lined { position: relative; border: 1px dashed var(--neutral-outline-2); border-radius: var(--radius); }
+.lined .dot {
+  position: absolute; width: 9px; height: 9px; border-radius: 999px;
+  background: var(--bg-0); box-shadow: var(--dot-shadow);
+}
+.lined .dot--tl { top: -5px; left: -5px; }
+.lined .dot--tr { top: -5px; right: -5px; }
+.lined .dot--bl { bottom: -5px; left: -5px; }
+.lined .dot--br { bottom: -5px; right: -5px; }
+
+/* ---------- Terminal blocks ---------- */
+/* The CLI's own colours: bold for the project line, dim for reasons and step
+   numbers, red for errors, yellow for warnings. Same meanings as the ANSI codes
+   the plugin emits, so the page reads like the terminal does. */
+.term {
+  background: var(--bg-0); border: 1px solid var(--neutral-outline-2);
+  border-radius: var(--radius); overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.05);
+}
+.term-bar {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px dashed var(--neutral-outline-2);
+  background: var(--bg-1); color: var(--neutral-fg-3);
+}
+.term-bar .lights { display: inline-flex; gap: 5px; margin-right: var(--s2); }
+.term-bar .lights i {
+  width: 9px; height: 9px; border-radius: 999px;
+  background: var(--neutral-outline-3); display: block;
+}
+.term pre {
+  margin: 0; padding: var(--s5) var(--s5) var(--s6);
+  overflow-x: auto;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px; line-height: 1.75; color: var(--neutral-fg-1);
+  tab-size: 2;
+}
+.term .c { color: var(--neutral-fg-1); font-weight: 600; }
+.term .c::before { content: "$ "; color: var(--neutral-fg-3); font-weight: 400; }
+.term .d { color: var(--neutral-fg-3); }
+.term .b { font-weight: 600; }
+.term .r { color: var(--color-danger); }
+.term .y { color: var(--color-warning); }
+.term .g { color: var(--color-success); }
+.term .a { color: var(--primary-fg); }
+
+
+/* ---------- Sections ---------- */
+section { padding: var(--s18) 0; }
+section.alt { background: var(--bg-1); border-top: 1px solid var(--neutral-outline-1); border-bottom: 1px solid var(--neutral-outline-1); }
+h2 {
+  font-size: clamp(26px, 3.6vw, 38px); line-height: 1.1;
+  letter-spacing: -1px; font-weight: 600; margin: 0 0 var(--s4);
+}
+h2 em { font-style: normal; color: var(--neutral-fg-3); display: block; }
+.ta-center { text-align: center; }
+.lede { color: var(--neutral-fg-2); max-width: 640px; margin: 0 auto var(--s10); }
+.split-header {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--s8);
+  align-items: end; margin-bottom: var(--s10);
+}
+.split-header h2 { margin: 0; }
+.split-header p { margin: 0; color: var(--neutral-fg-2); max-width: 460px; justify-self: end; }
+.eyebrow { color: var(--neutral-fg-3); }
+
+/* ---------- Feature grid (text only) ---------- */
+.feature-frame { border-top: 1px dashed var(--neutral-outline-2); overflow: hidden; }
+.feature-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  border-left: 1px dashed var(--neutral-outline-2);
+}
+.feature-item {
+  border-right: 1px dashed var(--neutral-outline-2);
+  border-bottom: 1px dashed var(--neutral-outline-2);
+  margin: -1px -1px 0 0;
+}
+.feature-item-content { padding: var(--s8); }
+.feature-item-content .eyebrow { margin: 0 0 var(--s3); }
+.feature-item-content h3 { margin: 0 0 var(--s2); font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+.feature-item-content p { margin: 0; color: var(--neutral-fg-2); font-size: 14px; line-height: 1.6; }
+.feature-item-content p + p { margin-top: var(--s3); }
+
+/* The heading now runs straight into the table, so it carries the gap the lede
+   used to provide. */
+#scope h2 { margin-bottom: var(--s10); }
+
+/* ---------- Support matrix ---------- */
+/* Wider than a phone by design: a three-column comparison cannot usefully reflow,
+   so the table keeps its shape and scrolls inside its own frame. */
+.matrix-wrap { overflow-x: auto; background: var(--bg-0); }
+.matrix { border-collapse: collapse; width: 100%; min-width: 680px; font-size: 14px; }
+.matrix th, .matrix td {
+  text-align: left; vertical-align: top;
+  padding: var(--s3) var(--s5);
+  border-bottom: 1px dashed var(--neutral-outline-2);
+}
+.matrix thead th {
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-family: "JetBrains Mono", ui-monospace, monospace; font-weight: 400;
+  color: var(--neutral-fg-3); padding-top: var(--s5); padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--neutral-outline-3);
+}
+.matrix thead th code { font-size: 11px; background: none; padding: 0; color: inherit; }
+.matrix tbody th { font-weight: 500; color: var(--neutral-fg-1); width: 34%; }
+.matrix td { width: 33%; color: var(--neutral-fg-2); }
+.matrix tr:last-child th, .matrix tr:last-child td { border-bottom: 0; }
+/* Plain mono throughout the table, with no pill behind it: keys sit next to commas
+   and colons constantly, and a padded background opens a visible gap before every
+   one. In here mono alone means "written literally"; colour is left to the verdict. */
+.matrix code {
+  font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12.5px;
+  background: none; padding: 0; color: var(--neutral-fg-1);
+}
+.matrix .why code { color: var(--neutral-fg-2); }
+
+/* Band heads: a full-width rule that names what the rows below have in common. */
+.matrix tr.band th {
+  background: var(--bg-2); width: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: 400; color: var(--neutral-fg-2);
+  padding-top: var(--s3); padding-bottom: var(--s3);
+  border-top: 1px solid var(--neutral-outline-2);
+  border-bottom: 1px solid var(--neutral-outline-2);
+}
+
+/* Verdict pills, coloured the way the coverage table grades a key. */
+.m {
+  display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px var(--s2); border-radius: 999px; border: 1px solid; white-space: nowrap;
+}
+.m--yes { color: var(--color-success); border-color: var(--color-success-outline); background: var(--color-success-surface); }
+.m--part, .m--soon { color: var(--color-warning); border-color: var(--color-warning-outline); background: var(--color-warning-surface); }
+.m--no { color: var(--color-danger); border-color: var(--color-danger-outline); background: var(--color-danger-surface); }
+.why { display: block; margin-top: var(--s2); font-size: 13px; color: var(--neutral-fg-3); line-height: 1.5; }
+
+/* ---------- Callouts ---------- */
+.callouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s5); }
+.callout {
+  background: var(--bg-0); border: 1px solid var(--neutral-outline-2);
+  border-left: 3px solid var(--neutral-outline-3);
+  border-radius: var(--radius); padding: var(--s5);
+}
+.callout h3 { margin: 0 0 var(--s2); font-size: 15px; font-weight: 600; }
+.callout p { margin: 0; font-size: 14px; color: var(--neutral-fg-2); }
+.callout.warn { border-left-color: var(--color-warning-outline); }
+.callout.warn h3 { color: var(--color-warning); }
+.callout.info { border-left-color: var(--primary-badge-outline); }
+.callout.info h3 { color: var(--primary-fg); }
+
+/* ---------- Install ---------- */
+.install-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+.install-cell { padding: var(--s6); border-right: 1px dashed var(--neutral-outline-2); min-width: 0; }
+.install-cell:last-child { border-right: none; }
+.install-cell .eyebrow { margin: 0 0 var(--s3); }
+.install-cell h3 { margin: 0 0 var(--s2); font-size: 17px; font-weight: 600; }
+.install-cell p { margin: 0; color: var(--neutral-fg-2); font-size: 14px; }
+.install-cell p + p { margin-top: var(--s3); }
+.install-cell code {
+  font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px;
+  background: var(--bg-2); padding: 1px 5px; border-radius: var(--radius-s);
+}
+/* Wrapped rather than scrolled: these are commands to copy, and a clipped URL in a
+   narrow column is a command that silently does not work. */
+.install-cell pre {
+  margin: var(--s3) 0 0; padding: var(--s3);
+  background: var(--bg-2); border-radius: var(--radius);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px;
+  line-height: 1.7; color: var(--neutral-fg-1);
+}
+.req { text-align: center; color: var(--neutral-fg-3); margin-top: var(--s6); font-size: 14px; }
+
+/* ---------- Closing ask ---------- */
+.ask { max-width: 680px; margin: 0 auto; text-align: center; }
+.ask p { color: var(--neutral-fg-2); font-size: 17px; margin: 0 0 var(--s4); }
+.ask .cta { justify-content: center; margin-top: var(--s8); }
+
+/* ---------- Footer ---------- */
+footer { padding: var(--s10) 0 var(--s12); border-top: 1px solid var(--neutral-outline-2); color: var(--neutral-fg-2); font-size: 14px; }
+.foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--s3); }
+.foot a { color: var(--neutral-fg-2); }
+.foot a:hover { color: var(--neutral-fg-1); }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 960px) {
+  .feature-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .promo-go { display: none; }
+}
+@media (max-width: 744px) {
+  .nav-links a.nav-link { display: none; }
+  .split-header { grid-template-columns: 1fr; align-items: start; }
+  .split-header p { justify-self: start; }
+  .feature-grid { grid-template-columns: 1fr; }
+  .install-grid, .callouts { grid-template-columns: 1fr; }
+  .install-cell { border-right: none; border-bottom: 1px dashed var(--neutral-outline-2); }
+  .install-cell:last-child { border-bottom: none; }
+  section { padding: var(--s12) 0; }
+  .term pre { font-size: 12px; }
+}
