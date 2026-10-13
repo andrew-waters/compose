@@ -3,7 +3,8 @@
   "branch" : "6-docker-compose-post-start-pre-stop",
   "issue" : "andrew-waters/compose#6",
   "pullRequests" : [
-    "https://github.com/andrew-waters/compose/pull/13"
+    "https://github.com/andrew-waters/compose/pull/13",
+    "https://github.com/apple/container/pull/239"
   ],
   "repos" : [
 
