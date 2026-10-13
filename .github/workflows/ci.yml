@@ -1,10 +1,34 @@
 name: CI
 
+# A run is a macOS runner for a long while, so nothing runs for a change that cannot affect the
+# build: the harness's own documents, Gannin's session commits, the site and Markdown. The list
+# appears twice here and once more in the release job's check below; keep all three in step.
+# Path filters never apply to tags, so a release always runs.
 on:
   pull_request:
+    paths-ignore:
+      - "sessions/**"
+      - "plans/**"
+      - "requirements/**"
+      - "findings/**"
+      - "prompts/**"
+      - ".gannin/**"
+      - ".claude/**"
+      - "site/**"
+      - "**/*.md"
   push:
     branches: [main]
     tags: ["*"]
+    paths-ignore:
+      - "sessions/**"
+      - "plans/**"
+      - "requirements/**"
+      - "findings/**"
+      - "prompts/**"
+      - ".gannin/**"
+      - ".claude/**"
+      - "site/**"
+      - "**/*.md"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,6 +39,8 @@ jobs:
     # The package declares macOS 26 and the plugin links apple/container, which needs the
     # same SDK, so this has to be a Tahoe runner. The tests themselves need nothing: the
     # planner is a pure function and the parser reads strings, so no daemon runs here.
+    # A tag points at a commit main has already tested, so a release does not test it again.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: macos-26
     permissions:
       contents: read
@@ -87,13 +113,14 @@ jobs:
         run: git diff --exit-code
 
   release:
-    # Only a tag is a release. The job publishes what `test` has already built the same way,
-    # rather than being the first place the shipped layout is exercised.
+    # Only a tag is a release. It ships what main has already tested and built the same way,
+    # rather than being the first place the shipped layout is exercised, and checks that
+    # rather than running the tests a second time.
     if: startsWith(github.ref, 'refs/tags/')
-    needs: test
     runs-on: macos-26
     permissions:
       contents: write
+      actions: read
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -115,6 +142,35 @@ jobs:
             ~/Library/Caches/org.swift.swiftpm
           key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
           restore-keys: ${{ runner.os }}-spm-
+
+      # The tagged commit itself may never have had a run: a commit that only touches ignored
+      # paths does not get one. So find the newest commit on main that passed and that the tag
+      # contains, and require that nothing CI would have tested has changed since. A tag on a
+      # commit whose run failed, or is still going, stops here.
+      - name: Check main passed CI on what is being released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tested=""
+          for sha in $(gh run list --workflow CI --branch main --event push --status success \
+              --limit 50 --json headSha --jq '.[].headSha'); do
+            if git merge-base --is-ancestor "$sha" "$GITHUB_SHA"; then tested=$sha; break; fi
+          done
+          if [ -z "$tested" ]; then
+            echo "no passing CI run on main for $GITHUB_SHA or anything before it"
+            exit 1
+          fi
+          if ! git diff --quiet "$tested" "$GITHUB_SHA" -- . \
+              ':(exclude,glob)sessions/**' ':(exclude,glob)plans/**' \
+              ':(exclude,glob)requirements/**' ':(exclude,glob)findings/**' \
+              ':(exclude,glob)prompts/**' ':(exclude,glob).gannin/**' \
+              ':(exclude,glob).claude/**' ':(exclude,glob)site/**' ':(exclude,glob)**/*.md'; then
+            echo "main last passed CI at $tested, and code has changed since then:"
+            git diff --stat "$tested" "$GITHUB_SHA"
+            echo "wait for CI on main to pass, then tag again"
+            exit 1
+          fi
+          echo "releasing what CI tested at $tested"
 
       - name: Build the plugin
         run: make build
