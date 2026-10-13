@@ -67,28 +67,44 @@ enum Runtime {
                 guard case .runHook(let hook) = operation else {
                     throw failed(operation, error, later: total - index - 1)
                 }
-                // Whatever went wrong, whether the hook exited non-zero or never got going,
-                // the plan decided up front whether it matters.
-                let text = (error as? HookFailure)?.description
-                    ?? "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` could not run: \(friendly(error))"
-                guard hook.failureIsFatal else {
-                    // The container is being stopped either way, so a failed `pre_stop` is
-                    // worth saying and not worth leaving the container up for.
-                    Output.warning(text + "\n  carrying on with the stop")
+                switch outcome(of: hook, failingWith: error, later: total - index - 1) {
+                case .carryOn(let warning):
+                    Output.warning(warning)
                     continue
+                case .stop(let message):
+                    throw ComposeError(message)
                 }
-                let later = total - index - 1
-                // The container is kept and its hash has not changed, so another `up` would
-                // leave it alone and the hook would not run again.
-                throw ComposeError(
-                    text
-                        + "\n  `\(hook.containerName)` was left in place"
-                        + (later > 0 ? "; \(later) later step(s) were not attempted" : "")
-                        + "\n  `up` keeps a running container, so it will not run this hook again; "
-                        + "run `down` and then `up` once it is fixed"
-                )
             }
         }
+    }
+
+    /// What a hook that went wrong means for the rest of the plan.
+    enum HookOutcome: Equatable {
+        /// Say so and go on to the next step.
+        case carryOn(warning: String)
+        /// Stop the plan with this message.
+        case stop(message: String)
+    }
+
+    /// Whatever went wrong, whether the hook exited non-zero or never got going, the plan
+    /// decided up front whether it matters.
+    static func outcome(of hook: HookOperation, failingWith error: any Error, later: Int) -> HookOutcome {
+        let text = (error as? HookFailure)?.description
+            ?? "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` could not run: \(friendly(error))"
+        guard hook.failureIsFatal else {
+            // The container is being stopped either way, so a failed `pre_stop` is worth
+            // saying and not worth leaving the container up for.
+            return .carryOn(warning: text + "\n  carrying on with the stop")
+        }
+        // The container is kept and its hash has not changed, so another `up` would leave it
+        // alone and the hook would not run again.
+        return .stop(
+            message: text
+                + "\n  `\(hook.containerName)` was left in place"
+                + (later > 0 ? "; \(later) later step(s) were not attempted" : "")
+                + "\n  `up` keeps a running container, so it will not run this hook again; "
+                + "run `down` and then `up` once it is fixed"
+        )
     }
 
     private static func failed(_ operation: ComposePlanner.Operation, _ error: any Error, later: Int) -> any Error {
@@ -407,13 +423,28 @@ enum Runtime {
                 return String(rest[rest.startIndex..<end])
             }
         }
-        return error.localizedDescription
+        return innermostCause(of: error.localizedDescription)
+    }
+
+    /// An error raised inside the guest reaches here with every layer's message wrapped round
+    /// the one below, quotes and all:
+    ///
+    ///     failed to start process (cause: "internalError: "startProcess: vmexec error:
+    ///     internalError: "failed to find target executable /no/such/script"""")
+    ///
+    /// The innermost message is the one that says what went wrong.
+    static func innermostCause(of text: String) -> String {
+        guard text.contains("(cause: \""), let opening = text.range(of: ": \"", options: .backwards) else {
+            return text
+        }
+        let cause = text[opening.upperBound...].prefix { $0 != "\"" }
+        return cause.isEmpty ? text : String(cause)
     }
 }
 
 /// A hook that ran and exited non-zero. Whether that stops the plan is the plan's decision,
 /// carried on the operation, so this only says what happened.
-private struct HookFailure: Error, CustomStringConvertible {
+struct HookFailure: Error, CustomStringConvertible {
     let hook: HookOperation
     let status: Int32
     let lastLines: [String]
@@ -431,7 +462,7 @@ private struct HookFailure: Error, CustomStringConvertible {
 /// Shows a hook's output line by line as it arrives, and keeps the end of it for the error
 /// if the hook fails. stdout and stderr both land on stdout here, interleaved as they come,
 /// because the order things happened in is the useful part.
-private final class HookTranscript: @unchecked Sendable {
+final class HookTranscript: @unchecked Sendable {
     private static let kept = 20
     private let lock = NSLock()
     private var lines: [String] = []

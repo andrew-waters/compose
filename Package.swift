@@ -55,5 +55,11 @@ let package = Package(
             name: "ComposePlannerTests",
             dependencies: ["ComposePlanner", "ComposeParser"]
         ),
+        // The parts of the plugin that decide something without the runtime: what a failed
+        // hook means, how a runtime error reads, how hook output is relayed.
+        .testTarget(
+            name: "ComposePluginTests",
+            dependencies: ["compose", "ComposePlanner"]
+        ),
     ]
 )

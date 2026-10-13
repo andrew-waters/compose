@@ -132,6 +132,13 @@
                 <td><span class="m m--yes">yes</span></td>
               </tr>
               <tr>
+                <th scope="row"><code>post_start</code>, <code>pre_stop</code> hooks</th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">run inside the container with their command,
+                  environment, working_dir and user; <code>privileged: true</code> is refused, and Orchard does not
+                  run them</span></td>
+              </tr>
+              <tr>
                 <th scope="row">Project naming, <code>-f</code>, <code>-p</code>, <code>--dry-run</code></th>
                 <td><span class="m m--yes">yes</span></td>
                 <td><span class="m m--yes">yes</span> <span class="why">name from the file, then the directory</span></td>

@@ -1,6 +1,6 @@
 ---
 type: plan
-status: in-progress
+status: done
 summary: "Support Docker Compose v2.30's post_start and pre_stop service hooks in the container compose plugin, as requested in andrew-waters/compose#6. Orchard is out of scope."
 issues: [andrew-waters/compose#6, andrew-waters/compose#7, andrew-waters/compose#8, andrew-waters/compose#9, andrew-waters/compose#10, andrew-waters/compose#11, andrew-waters/compose#12]
 touches: [andrew-waters/compose, andrew-waters/orchard, apple/container]

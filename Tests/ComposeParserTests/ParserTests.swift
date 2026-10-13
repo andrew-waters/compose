@@ -334,4 +334,54 @@ struct HookParsingTests {
         #expect(result.findings.first?.key == "post_start[0].tty")
         #expect(result.findings.first?.kind == .unknownKey)
     }
+
+    @Test("privileged has to be true or false")
+    func privilegedMustBeABoolean() throws {
+        let error = #expect(throws: ParseError.self) {
+            try Fixture.parse(
+                "services:\n  web:\n    image: nginx\n    pre_stop:\n      - command: x\n        privileged: sometimes\n"
+            )
+        }
+        #expect(error?.reason == .wrongShape)
+        #expect(error?.mark?.line == 6)
+    }
+
+    @Test("An empty hook list is no hooks, and hooks have to be a list")
+    func shapes() throws {
+        let empty = try Fixture.parse("services:\n  web:\n    image: nginx\n    post_start:\n")
+        #expect(empty.file.services["web"]?.postStart == [])
+        #expect(empty.findings.isEmpty)
+
+        let notAList = #expect(throws: ParseError.self) {
+            try Fixture.parse("services:\n  web:\n    image: nginx\n    post_start:\n      command: x\n")
+        }
+        #expect(notAList?.reason == .wrongShape)
+    }
+
+    @Test("A hook's values are interpolated, and a bare environment name takes the shell's value")
+    func interpolationAndInheritance() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              web:
+                image: nginx
+                post_start:
+                  - command: ./setup.sh ${MODE}
+                    user: ${HOOK_USER:-root}
+                    working_dir: $$HOME
+                    environment:
+                      - TOKEN
+                      - UNSET_IN_SHELL
+            """,
+            environment: ["MODE": "fast", "TOKEN": "abc"]
+        )
+        #expect(result.file.services["web"]?.postStart == [
+            Service.Hook(
+                command: ["./setup.sh", "fast"],
+                environment: ["TOKEN": "abc"],
+                workingDirectory: "$HOME",
+                user: "root"
+            ),
+        ])
+    }
 }

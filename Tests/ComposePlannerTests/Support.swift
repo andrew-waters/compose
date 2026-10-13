@@ -11,6 +11,14 @@ extension Plan {
             return create
         }
     }
+
+    /// The hooks a plan runs, in order.
+    var hookOperations: [HookOperation] {
+        operations.compactMap { operation in
+            guard case .runHook(let hook) = operation else { return nil }
+            return hook
+        }
+    }
 }
 
 enum Sample {
