@@ -8,3 +8,7 @@ scratch
 .swiftpm/
 
 .DS_Store
+
+# Gannin: per-issue worktrees and shared clones of other repos, never committed
+/.worktrees/
+/projects/

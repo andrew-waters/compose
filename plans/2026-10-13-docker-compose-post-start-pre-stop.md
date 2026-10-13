@@ -125,4 +125,4 @@ In full in [requirements/docker-compose-post-start-pre-stop.md](../requirements/
 
 ## Open questions
 
-- STANDARDS.md and plans/_template.md are missing from the repo; who supplies them before the plan is written?
+- STANDARDS.md and plans/_template.md are missing from the repo; who supplies them before the plan is written? **Added after the fact, modelled on this plan, alongside CLAUDE.md.**

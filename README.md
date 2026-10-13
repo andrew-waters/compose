@@ -205,6 +205,14 @@ BuildKit builder, dialling it and unpacking the result are all things the `conta
 already does, so the plugin shells out to `container build` rather than reimplementing the
 hard part. Orchard does the same for the same reason.
 
+## Releasing
+
+A release is an annotated tag on `main`, such as `0.5.0`, whose first line is the release title.
+Pushing it makes CI build, package and publish the release with notes generated from the merged
+pull requests; nothing is released by merging. The steps are in
+[.claude/skills/release/SKILL.md](.claude/skills/release/SKILL.md), and how work is planned and
+reviewed here is in [CLAUDE.md](CLAUDE.md) and [STANDARDS.md](STANDARDS.md).
+
 ## Requirements
 
 - Apple silicon Mac running macOS 26

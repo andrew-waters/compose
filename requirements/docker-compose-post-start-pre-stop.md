@@ -1,6 +1,6 @@
 ---
 type: requirement
-status: in-progress
+status: done
 summary: "Compose files using post_start and pre_stop run on Apple's container runtime with the hooks honoured, instead of being refused."
 issues: [andrew-waters/compose#6]
 plans: [plans/2026-10-13-docker-compose-post-start-pre-stop.md]
@@ -53,6 +53,6 @@ People running Docker Compose files on Apple's container runtime through the con
 
 ## Open questions
 
-- STANDARDS.md and plans/_template.md are missing from the repo; who supplies them before the plan is written?
+- STANDARDS.md and plans/_template.md are missing from the repo; who supplies them before the plan is written? **Added after the fact, modelled on this plan, alongside CLAUDE.md.**
 
 Planned in [plans/2026-10-13-docker-compose-post-start-pre-stop.md](../plans/2026-10-13-docker-compose-post-start-pre-stop.md).
