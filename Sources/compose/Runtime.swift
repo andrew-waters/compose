@@ -63,31 +63,43 @@ enum Runtime {
             Output.step(index + 1, of: total, operation.summary)
             do {
                 try await perform(operation)
-            } catch let failure as HookFailure {
-                let later = total - index - 1
-                guard failure.hook.failureIsFatal else {
+            } catch {
+                guard case .runHook(let hook) = operation else {
+                    throw failed(operation, error, later: total - index - 1)
+                }
+                // Whatever went wrong, whether the hook exited non-zero or never got going,
+                // the plan decided up front whether it matters.
+                let text = (error as? HookFailure)?.description
+                    ?? "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` could not run: \(friendly(error))"
+                guard hook.failureIsFatal else {
                     // The container is being stopped either way, so a failed `pre_stop` is
                     // worth saying and not worth leaving the container up for.
-                    Output.warning(failure.description + "\n  carrying on with the stop")
+                    Output.warning(text + "\n  carrying on with the stop")
                     continue
                 }
+                let later = total - index - 1
+                // The container is kept and its hash has not changed, so another `up` would
+                // leave it alone and the hook would not run again.
                 throw ComposeError(
-                    failure.description
-                        + "\n  `\(failure.hook.containerName)` was left running"
+                    text
+                        + "\n  `\(hook.containerName)` was left in place"
                         + (later > 0 ? "; \(later) later step(s) were not attempted" : "")
-                )
-            } catch let error as ComposeError {
-                throw error
-            } catch {
-                // A plan stops at the first failure. Some of it has happened and the rest has
-                // not, which is worth saying plainly: the next `up` will work out the
-                // difference from the containers themselves.
-                throw ComposeError(
-                    "\(operation.summary) failed: \(friendly(error))\n"
-                    + "  \(total - index - 1) later step(s) were not attempted; run `up` again once it is fixed"
+                        + "\n  `up` keeps a running container, so it will not run this hook again; "
+                        + "run `down` and then `up` once it is fixed"
                 )
             }
         }
+    }
+
+    private static func failed(_ operation: ComposePlanner.Operation, _ error: any Error, later: Int) -> any Error {
+        if error is ComposeError { return error }
+        // A plan stops at the first failure. Some of it has happened and the rest has not,
+        // which is worth saying plainly: the next `up` will work out the difference from the
+        // containers themselves.
+        return ComposeError(
+            "\(operation.summary) failed: \(friendly(error))\n"
+                + "  \(later) later step(s) were not attempted; run `up` again once it is fixed"
+        )
     }
 
     // `Operation` is a name Foundation also uses, hence the qualification.
@@ -124,10 +136,7 @@ enum Runtime {
         let client = ContainerClient()
         let container = try await client.get(id: operation.containerName)
         guard container.status == .running else {
-            throw ComposeError(
-                "`\(operation.containerName)` is not running, so "
-                    + "\(operation.phase.rawValue)[\(operation.index)] cannot run in it"
-            )
+            throw ComposeError("`\(operation.containerName)` is not running")
         }
         guard let executable = operation.command.first else {
             throw ComposeError("\(operation.phase.rawValue)[\(operation.index)] in service `\(operation.service)` has no command")
@@ -160,10 +169,14 @@ enum Runtime {
         try await process.start()
 
         let transcript = HookTranscript()
-        async let relayedOutput: Void = transcript.relay(output.fileHandleForReading)
-        async let relayedErrors: Void = transcript.relay(errors.fileHandleForReading)
+        for handle in [output.fileHandleForReading, errors.fileHandleForReading] {
+            Task { await transcript.relay(handle) }
+        }
         let status = try await process.wait()
-        _ = await (relayedOutput, relayedErrors)
+        // A hook that leaves something running in the background (`daemon &`) leaves it
+        // holding the hook's output, so the end of the stream may never come. Give it a
+        // moment to drain, as `container exec` does, then stop showing it and move on.
+        await transcript.drain(streams: 2, within: .seconds(3))
 
         guard status == 0 else {
             throw HookFailure(hook: operation, status: status, lastLines: transcript.lastLines)
@@ -427,23 +440,46 @@ private final class HookTranscript: @unchecked Sendable {
         lock.withLock { lines }
     }
 
-    private func keep(_ line: String) {
-        lock.withLock {
+    private var finished = 0
+    private var stopped = false
+
+    /// Shows and keeps a line, unless the hook has been moved on from.
+    private func show(_ line: String) {
+        let shown = lock.withLock { () -> Bool in
+            guard !stopped else { return false }
             lines.append(line)
             if lines.count > Self.kept { lines.removeFirst(lines.count - Self.kept) }
+            return true
         }
+        if shown { Output.line("        \(line)") }
+    }
+
+    private func finish() {
+        lock.withLock { finished += 1 }
     }
 
     func relay(_ handle: FileHandle) async {
         do {
             for try await line in handle.bytes.lines {
-                Output.line("        \(line)")
-                keep(line)
+                show(line)
             }
         } catch {
             // A stream that breaks part way loses the rest of the output, not the hook's
             // exit status, which is what decides the outcome.
         }
+        finish()
+    }
+
+    /// Waits for every stream to end, or for the deadline, whichever is first. Polled rather
+    /// than awaited: a read on a pipe something else still holds does not end when asked to,
+    /// so nothing that waits for the relays themselves could be given a deadline.
+    func drain(streams: Int, within limit: Duration) async {
+        let deadline = ContinuousClock.now + limit
+        while ContinuousClock.now < deadline {
+            if lock.withLock({ finished >= streams }) { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        lock.withLock { stopped = true }
     }
 }
 
