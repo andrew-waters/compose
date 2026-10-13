@@ -117,7 +117,7 @@ In full in [requirements/docker-compose-post-start-pre-stop.md](../requirements/
 - [x] [andrew-waters/compose#9](https://github.com/andrew-waters/compose/issues/9) Emit runHook operations from the planner (satisfies R4, R7, R9, R11)
 - [x] [andrew-waters/compose#10](https://github.com/andrew-waters/compose/issues/10) Run hooks in the plugin runtime (satisfies R4, R5, R6, R8)
 - [x] [andrew-waters/compose#11](https://github.com/andrew-waters/compose/issues/11) Document post_start and pre_stop support in the README (satisfies R10)
-- [ ] [andrew-waters/compose#12](https://github.com/andrew-waters/compose/issues/12) Tell Orchard about the new runHook operation
+- [x] [andrew-waters/compose#12](https://github.com/andrew-waters/compose/issues/12) Tell Orchard about the new runHook operation (filed as andrew-waters/orchard#126)
 
 **Decisions:**
 
