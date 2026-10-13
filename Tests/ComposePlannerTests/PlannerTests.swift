@@ -619,3 +619,232 @@ struct ProjectIdentityTests {
         #expect(Sample.project.containerName(for: try #require(file.services["db"])) == "the-database")
     }
 }
+
+@Suite("Lifecycle hooks")
+struct HookPlanningTests {
+    static let hooked = """
+        services:
+          web:
+            image: nginx
+            depends_on: [db]
+            post_start:
+              - command: ./one.sh
+                environment: {B: "2", A: "1"}
+                working_dir: /srv
+                user: www-data
+              - command: ./two.sh
+            pre_stop:
+              - command: ./bye.sh
+                environment: [MODE=stop]
+          db:
+            image: postgres:16
+        """
+
+    static let postStart = [
+        HookOperation(
+            service: "web",
+            containerName: "shop-web",
+            phase: .postStart,
+            index: 0,
+            command: ["./one.sh"],
+            environment: ["A=1", "B=2"],
+            workingDirectory: "/srv",
+            user: "www-data",
+            failureIsFatal: true
+        ),
+        HookOperation(
+            service: "web",
+            containerName: "shop-web",
+            phase: .postStart,
+            index: 1,
+            command: ["./two.sh"],
+            failureIsFatal: true
+        ),
+    ]
+
+    static let preStop = [
+        HookOperation(
+            service: "web",
+            containerName: "shop-web",
+            phase: .preStop,
+            index: 0,
+            command: ["./bye.sh"],
+            environment: ["MODE=stop"],
+            failureIsFatal: false
+        ),
+    ]
+
+    @Test("post_start hooks run in order right after their container starts")
+    func postStartFollowsStart() throws {
+        let file = try Sample.file(Self.hooked)
+        let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState(images: ["nginx", "postgres:16"]))
+        #expect(plan.operations.map(\.summary) == [
+            "create network shop_default",
+            "create container shop-db",
+            "start shop-db",
+            "create container shop-web",
+            "start shop-web",
+            "run post_start[0] in shop-web",
+            "run post_start[1] in shop-web",
+        ])
+        #expect(plan.hookOperations == Self.postStart)
+    }
+
+    @Test("A stopped container that is started again runs its post_start hooks")
+    func restartedContainerRunsPostStart() throws {
+        let file = try Sample.file(Self.hooked)
+        let state = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: file),
+                try Sample.container(service: "web", in: file, running: false),
+            ],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            images: ["nginx", "postgres:16"]
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(plan.operations.map(\.summary) == [
+            "start shop-web",
+            "run post_start[0] in shop-web",
+            "run post_start[1] in shop-web",
+        ])
+        #expect(plan.hookOperations == Self.postStart)
+    }
+
+    @Test("A running container that has not changed runs no hooks")
+    func unchangedRunsNothing() throws {
+        let file = try Sample.file(Self.hooked)
+        let state = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: file),
+                try Sample.container(service: "web", in: file),
+            ],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            images: ["nginx", "postgres:16"]
+        )
+        #expect(try Planner.up(file: file, project: Sample.project, state: state).operations.isEmpty)
+    }
+
+    @Test("Recreating runs pre_stop on the old container and post_start on the new one")
+    func recreateRunsBoth() throws {
+        let file = try Sample.file(Self.hooked)
+        let state = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: file),
+                try Sample.container(service: "web", in: file, hash: "an-older-hash"),
+            ],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            images: ["nginx", "postgres:16"]
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(plan.operations.map(\.summary) == [
+            "run pre_stop[0] in shop-web",
+            "stop shop-web",
+            "remove shop-web",
+            "create container shop-web",
+            "start shop-web",
+            "run post_start[0] in shop-web",
+            "run post_start[1] in shop-web",
+        ])
+        #expect(plan.hookOperations == Self.preStop + Self.postStart)
+    }
+
+    @Test("Recreating a container that is already stopped skips its pre_stop hooks")
+    func recreateStoppedSkipsPreStop() throws {
+        let file = try Sample.file(Self.hooked)
+        let state = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: file),
+                try Sample.container(service: "web", in: file, running: false, hash: "an-older-hash"),
+            ],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            images: ["nginx", "postgres:16"]
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(plan.operations.map(\.summary) == [
+            "remove shop-web",
+            "create container shop-web",
+            "start shop-web",
+            "run post_start[0] in shop-web",
+            "run post_start[1] in shop-web",
+        ])
+        #expect(plan.hookOperations == Self.postStart)
+    }
+
+    @Test("down runs pre_stop before stopping, and skips it for a container already stopped")
+    func downRunsPreStop() throws {
+        let file = try Sample.file(Self.hooked)
+        let running = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: file),
+                try Sample.container(service: "web", in: file),
+            ]
+        )
+        let plan = try Planner.down(file: file, project: Sample.project, state: running)
+        #expect(plan.operations.map(\.summary) == [
+            "run pre_stop[0] in shop-web",
+            "stop shop-web",
+            "remove shop-web",
+            "stop shop-db",
+            "remove shop-db",
+        ])
+        #expect(plan.hookOperations == Self.preStop)
+
+        let stopped = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: file),
+                try Sample.container(service: "web", in: file, running: false),
+            ]
+        )
+        let quiet = try Planner.down(file: file, project: Sample.project, state: stopped)
+        #expect(quiet.operations.map(\.summary) == [
+            "remove shop-web",
+            "stop shop-db",
+            "remove shop-db",
+        ])
+        #expect(quiet.hookOperations.isEmpty)
+    }
+
+    @Test("A container whose service has left the file runs no hooks on its way out")
+    func orphansRunNoHooks() throws {
+        let previous = try Sample.file(Self.hooked)
+        let file = try Sample.file(
+            """
+            services:
+              db:
+                image: postgres:16
+            """
+        )
+        let state = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: previous),
+                try Sample.container(service: "web", in: previous),
+            ],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            images: ["postgres:16"]
+        )
+        let down = try Planner.down(file: file, project: Sample.project, state: state)
+        #expect(down.hookOperations.isEmpty)
+        #expect(down.operations.map(\.summary).contains("stop shop-web"))
+
+        let up = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(up.operations.map(\.summary) == ["stop shop-web", "remove shop-web"])
+    }
+
+    @Test("Editing a hook changes the hash; a service with none hashes as it always did")
+    func hooksInTheHash() throws {
+        // Pinned, so a container created before hooks existed is not recreated by the upgrade.
+        #expect(Service(name: "db", image: "postgres:16").canonicalDescription == "service=db\nimage=postgres:16")
+
+        var service = Service(name: "web", image: "nginx", postStart: [Service.Hook(command: ["./one.sh"])])
+        let before = ProjectIdentity.hash(of: service)
+        service.postStart[0].user = "root"
+        #expect(ProjectIdentity.hash(of: service) != before)
+        service.postStart = []
+        #expect(ProjectIdentity.hash(of: service) == ProjectIdentity.hash(of: Service(name: "web", image: "nginx")))
+
+        // The same hook as pre_stop rather than post_start is a different container.
+        let asPostStart = Service(name: "web", image: "nginx", postStart: [Service.Hook(command: ["./x.sh"])])
+        let asPreStop = Service(name: "web", image: "nginx", preStop: [Service.Hook(command: ["./x.sh"])])
+        #expect(ProjectIdentity.hash(of: asPostStart) != ProjectIdentity.hash(of: asPreStop))
+    }
+}

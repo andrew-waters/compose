@@ -63,18 +63,59 @@ enum Runtime {
             Output.step(index + 1, of: total, operation.summary)
             do {
                 try await perform(operation)
-            } catch let error as ComposeError {
-                throw error
             } catch {
-                // A plan stops at the first failure. Some of it has happened and the rest has
-                // not, which is worth saying plainly: the next `up` will work out the
-                // difference from the containers themselves.
-                throw ComposeError(
-                    "\(operation.summary) failed: \(friendly(error))\n"
-                    + "  \(total - index - 1) later step(s) were not attempted; run `up` again once it is fixed"
-                )
+                guard case .runHook(let hook) = operation else {
+                    throw failed(operation, error, later: total - index - 1)
+                }
+                switch outcome(of: hook, failingWith: error, later: total - index - 1) {
+                case .carryOn(let warning):
+                    Output.warning(warning)
+                    continue
+                case .stop(let message):
+                    throw ComposeError(message)
+                }
             }
         }
+    }
+
+    /// What a hook that went wrong means for the rest of the plan.
+    enum HookOutcome: Equatable {
+        /// Say so and go on to the next step.
+        case carryOn(warning: String)
+        /// Stop the plan with this message.
+        case stop(message: String)
+    }
+
+    /// Whatever went wrong, whether the hook exited non-zero or never got going, the plan
+    /// decided up front whether it matters.
+    static func outcome(of hook: HookOperation, failingWith error: any Error, later: Int) -> HookOutcome {
+        let text = (error as? HookFailure)?.description
+            ?? "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` could not run: \(friendly(error))"
+        guard hook.failureIsFatal else {
+            // The container is being stopped either way, so a failed `pre_stop` is worth
+            // saying and not worth leaving the container up for.
+            return .carryOn(warning: text + "\n  carrying on with the stop")
+        }
+        // The container is kept and its hash has not changed, so another `up` would leave it
+        // alone and the hook would not run again.
+        return .stop(
+            message: text
+                + "\n  `\(hook.containerName)` was left in place"
+                + (later > 0 ? "; \(later) later step(s) were not attempted" : "")
+                + "\n  `up` keeps a running container, so it will not run this hook again; "
+                + "run `down` and then `up` once it is fixed"
+        )
+    }
+
+    private static func failed(_ operation: ComposePlanner.Operation, _ error: any Error, later: Int) -> any Error {
+        if error is ComposeError { return error }
+        // A plan stops at the first failure. Some of it has happened and the rest has not,
+        // which is worth saying plainly: the next `up` will work out the difference from the
+        // containers themselves.
+        return ComposeError(
+            "\(operation.summary) failed: \(friendly(error))\n"
+                + "  \(later) later step(s) were not attempted; run `up` again once it is fixed"
+        )
     }
 
     // `Operation` is a name Foundation also uses, hence the qualification.
@@ -97,6 +138,64 @@ enum Runtime {
             try await ContainerClient().stop(id: reference.containerName)
         case .removeContainer(let reference):
             try await ContainerClient().delete(id: reference.containerName, force: true)
+        case .runHook(let operation):
+            try await runHook(operation)
+        }
+    }
+
+    /// A hook runs the way `container exec` runs anything: a new process in the running
+    /// container, starting from the container's own process configuration so that whatever
+    /// the hook does not set (environment, directory, user) is what the service runs with.
+    ///
+    /// Output is shown as it arrives, under the step, as build output is.
+    private static func runHook(_ operation: HookOperation) async throws {
+        let client = ContainerClient()
+        let container = try await client.get(id: operation.containerName)
+        guard container.status == .running else {
+            throw ComposeError("`\(operation.containerName)` is not running")
+        }
+        guard let executable = operation.command.first else {
+            throw ComposeError("\(operation.phase.rawValue)[\(operation.index)] in service `\(operation.service)` has no command")
+        }
+
+        var configuration = container.configuration.initProcess
+        configuration.executable = executable
+        configuration.arguments = Array(operation.command.dropFirst())
+        configuration.terminal = false
+        configuration.environment.append(contentsOf: operation.environment)
+        if let workingDirectory = operation.workingDirectory {
+            configuration.workingDirectory = workingDirectory
+        }
+        if let user = operation.user {
+            configuration.user = .raw(userString: user)
+        }
+
+        let output = Pipe()
+        let errors = Pipe()
+        let process = try await client.createProcess(
+            containerId: container.id,
+            processId: UUID().uuidString.lowercased(),
+            configuration: configuration,
+            stdio: [nil, output.fileHandleForWriting, errors.fileHandleForWriting]
+        )
+        // The runtime holds its own copies now. Ours have to go, or the reads below never
+        // see the end of the stream.
+        try? output.fileHandleForWriting.close()
+        try? errors.fileHandleForWriting.close()
+        try await process.start()
+
+        let transcript = HookTranscript()
+        for handle in [output.fileHandleForReading, errors.fileHandleForReading] {
+            Task { await transcript.relay(handle) }
+        }
+        let status = try await process.wait()
+        // A hook that leaves something running in the background (`daemon &`) leaves it
+        // holding the hook's output, so the end of the stream may never come. Give it a
+        // moment to drain, as `container exec` does, then stop showing it and move on.
+        await transcript.drain(streams: 2, within: .seconds(3))
+
+        guard status == 0 else {
+            throw HookFailure(hook: operation, status: status, lastLines: transcript.lastLines)
         }
     }
 
@@ -324,7 +423,94 @@ enum Runtime {
                 return String(rest[rest.startIndex..<end])
             }
         }
-        return error.localizedDescription
+        return innermostCause(of: error.localizedDescription)
+    }
+
+    /// An error raised inside the guest reaches here with every layer's message wrapped round
+    /// the one below, quotes and all:
+    ///
+    ///     failed to start process (cause: "internalError: "startProcess: vmexec error:
+    ///     internalError: "failed to find target executable /no/such/script"""")
+    ///
+    /// The innermost message is the one that says what went wrong.
+    static func innermostCause(of text: String) -> String {
+        guard text.contains("(cause: \""), let opening = text.range(of: ": \"", options: .backwards) else {
+            return text
+        }
+        let cause = text[opening.upperBound...].prefix { $0 != "\"" }
+        return cause.isEmpty ? text : String(cause)
+    }
+}
+
+/// A hook that ran and exited non-zero. Whether that stops the plan is the plan's decision,
+/// carried on the operation, so this only says what happened.
+struct HookFailure: Error, CustomStringConvertible {
+    let hook: HookOperation
+    let status: Int32
+    let lastLines: [String]
+
+    var description: String {
+        var text = "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` exited \(status)"
+        if !lastLines.isEmpty {
+            text += "\n  its last output was:"
+            for line in lastLines { text += "\n    \(line)" }
+        }
+        return text
+    }
+}
+
+/// Shows a hook's output line by line as it arrives, and keeps the end of it for the error
+/// if the hook fails. stdout and stderr both land on stdout here, interleaved as they come,
+/// because the order things happened in is the useful part.
+final class HookTranscript: @unchecked Sendable {
+    private static let kept = 20
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var lastLines: [String] {
+        lock.withLock { lines }
+    }
+
+    private var finished = 0
+    private var stopped = false
+
+    /// Shows and keeps a line, unless the hook has been moved on from.
+    private func show(_ line: String) {
+        let shown = lock.withLock { () -> Bool in
+            guard !stopped else { return false }
+            lines.append(line)
+            if lines.count > Self.kept { lines.removeFirst(lines.count - Self.kept) }
+            return true
+        }
+        if shown { Output.line("        \(line)") }
+    }
+
+    private func finish() {
+        lock.withLock { finished += 1 }
+    }
+
+    func relay(_ handle: FileHandle) async {
+        do {
+            for try await line in handle.bytes.lines {
+                show(line)
+            }
+        } catch {
+            // A stream that breaks part way loses the rest of the output, not the hook's
+            // exit status, which is what decides the outcome.
+        }
+        finish()
+    }
+
+    /// Waits for every stream to end, or for the deadline, whichever is first. Polled rather
+    /// than awaited: a read on a pipe something else still holds does not end when asked to,
+    /// so nothing that waits for the relays themselves could be given a deadline.
+    func drain(streams: Int, within limit: Duration) async {
+        let deadline = ContinuousClock.now + limit
+        while ContinuousClock.now < deadline {
+            if lock.withLock({ finished >= streams }) { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        lock.withLock { stopped = true }
     }
 }
 

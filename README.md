@@ -55,7 +55,25 @@ The dividing line is what container's own create surface can already express.
 
 **Supported:** `image`, `build`, `container_name`, `command`, `environment`, `env_file`,
 `working_dir`, `ports`, bind `volumes`, `labels`, `networks`, `dns`, `dns_search`,
-`dns_opt`, `deploy.resources`, and `depends_on` in its list form.
+`dns_opt`, `deploy.resources`, `depends_on` in its list form, and the `post_start` and
+`pre_stop` lifecycle hooks.
+
+Hooks run inside the service's container with their `command`, `environment`, `working_dir`
+and `user`; anything a hook leaves out is what the container's own process runs with. `up`
+runs each `post_start` hook, in order, after it starts a container. `down`, and `up` when it
+recreates a container, run each `pre_stop` hook before stopping a running one; a container
+that is already stopped skips them. A hook's output is shown as it runs.
+
+A `post_start` that fails, by exiting non-zero or by not starting at all, fails `up` with its
+output and exit code and leaves the container in place. `up` keeps a running container, so it
+will not run the hook again: run `down` and then `up` once it is fixed. A failing `pre_stop`
+is reported and the stop goes ahead. Changing a service's hooks recreates its container on
+the next `up`.
+
+`privileged: false` on a hook is accepted, and `privileged: true` is refused: a process run in
+a container has no privileged mode. As everywhere in a compose file, `$VAR` in a hook is
+filled in from your shell when the file is read; write `$$VAR` for the container's own
+variable. Orchard does not run hooks.
 
 **Not yet:** `entrypoint`, named `volumes`, attaching to multiple networks, `profiles`,
 `include`, `healthcheck`, and `depends_on` with conditions. `pull_policy` and `platform` are

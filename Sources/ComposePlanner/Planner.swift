@@ -219,6 +219,7 @@ public enum Planner {
                 continue
             case .start:
                 operations.append(.startContainer(reference))
+                operations.append(contentsOf: hookOperations(.postStart, of: service, containerName: containerName))
             case .create, .recreate:
                 let image = imageReference(for: service, project: project)
                 if let build = service.build {
@@ -239,7 +240,10 @@ public enum Planner {
                 }
                 if action == .recreate, let existing = existingByService[name] {
                     let old = ContainerReference(containerName: existing.name, service: name)
-                    if existing.isRunning { operations.append(.stopContainer(old)) }
+                    if existing.isRunning {
+                        operations.append(contentsOf: hookOperations(.preStop, of: service, containerName: existing.name))
+                        operations.append(.stopContainer(old))
+                    }
                     operations.append(.removeContainer(old))
                 }
                 operations.append(
@@ -254,6 +258,7 @@ public enum Planner {
                     )
                 )
                 operations.append(.startContainer(reference))
+                operations.append(contentsOf: hookOperations(.postStart, of: service, containerName: containerName))
             }
         }
 
@@ -290,7 +295,14 @@ public enum Planner {
         var decisions: [ServiceDecision] = []
         for container in ordered {
             let reference = ContainerReference(containerName: container.name, service: container.serviceName)
-            if container.isRunning { operations.append(.stopContainer(reference)) }
+            if container.isRunning {
+                // Hooks come from the file as it is now. A container whose service the file
+                // no longer declares has none to run.
+                if let service = container.serviceName.flatMap({ file.services[$0] }) {
+                    operations.append(contentsOf: hookOperations(.preStop, of: service, containerName: container.name))
+                }
+                operations.append(.stopContainer(reference))
+            }
             operations.append(.removeContainer(reference))
             decisions.append(
                 ServiceDecision(
@@ -314,6 +326,31 @@ public enum Planner {
         }
 
         return Plan(project: project, operations: operations, decisions: decisions)
+    }
+
+    /// A service's hooks for one phase, as operations against one container, in the order the
+    /// file declared them.
+    private static func hookOperations(
+        _ phase: HookOperation.Phase,
+        of service: Service,
+        containerName: String
+    ) -> [Operation] {
+        let hooks = phase == .postStart ? service.postStart : service.preStop
+        return hooks.enumerated().map { index, hook in
+            .runHook(
+                HookOperation(
+                    service: service.name,
+                    containerName: containerName,
+                    phase: phase,
+                    index: index,
+                    command: hook.command,
+                    environment: hook.environment.keys.sorted().map { "\($0)=\(hook.environment[$0] ?? "")" },
+                    workingDirectory: hook.workingDirectory,
+                    user: hook.user,
+                    failureIsFatal: phase == .postStart
+                )
+            )
+        }
     }
 
     // MARK: - Decisions
