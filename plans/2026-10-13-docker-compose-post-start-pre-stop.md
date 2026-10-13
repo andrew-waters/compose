@@ -112,12 +112,12 @@ In full in [requirements/docker-compose-post-start-pre-stop.md](../requirements/
 
 ## Tasks
 
-1. [andrew-waters/compose#7](https://github.com/andrew-waters/compose/issues/7) Model and parse post_start and pre_stop hooks (satisfies R1, R2, R3)
-2. [andrew-waters/compose#8](https://github.com/andrew-waters/compose/issues/8) Include hooks in the service hash, only when present (satisfies R11, R12)
-3. [andrew-waters/compose#9](https://github.com/andrew-waters/compose/issues/9) Emit runHook operations from the planner (satisfies R4, R7, R9, R11)
-4. [andrew-waters/compose#10](https://github.com/andrew-waters/compose/issues/10) Run hooks in the plugin runtime (satisfies R4, R5, R6, R8)
-5. [andrew-waters/compose#11](https://github.com/andrew-waters/compose/issues/11) Document post_start and pre_stop support in the README (satisfies R10)
-6. [andrew-waters/compose#12](https://github.com/andrew-waters/compose/issues/12) Tell Orchard about the new runHook operation
+- [x] [andrew-waters/compose#7](https://github.com/andrew-waters/compose/issues/7) Model and parse post_start and pre_stop hooks (satisfies R1, R2, R3)
+- [x] [andrew-waters/compose#8](https://github.com/andrew-waters/compose/issues/8) Include hooks in the service hash, only when present (satisfies R11, R12)
+- [x] [andrew-waters/compose#9](https://github.com/andrew-waters/compose/issues/9) Emit runHook operations from the planner (satisfies R4, R7, R9, R11)
+- [x] [andrew-waters/compose#10](https://github.com/andrew-waters/compose/issues/10) Run hooks in the plugin runtime (satisfies R4, R5, R6, R8)
+- [x] [andrew-waters/compose#11](https://github.com/andrew-waters/compose/issues/11) Document post_start and pre_stop support in the README (satisfies R10)
+- [ ] [andrew-waters/compose#12](https://github.com/andrew-waters/compose/issues/12) Tell Orchard about the new runHook operation
 
 **Decisions:**
 

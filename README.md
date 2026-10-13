@@ -55,7 +55,17 @@ The dividing line is what container's own create surface can already express.
 
 **Supported:** `image`, `build`, `container_name`, `command`, `environment`, `env_file`,
 `working_dir`, `ports`, bind `volumes`, `labels`, `networks`, `dns`, `dns_search`,
-`dns_opt`, `deploy.resources`, and `depends_on` in its list form.
+`dns_opt`, `deploy.resources`, `depends_on` in its list form, and the `post_start` and
+`pre_stop` lifecycle hooks.
+
+Hooks run inside the service's container with their `command`, `environment`, `working_dir`
+and `user`. `up` runs each `post_start` hook, in order, after it starts a container; `down`,
+and `up` when it recreates a container, run each `pre_stop` hook before stopping a running
+one. A failing `post_start` fails `up` with the hook's output and exit code and leaves the
+container running; a failing `pre_stop` is reported and the stop goes ahead. `privileged:
+false` on a hook is accepted, and `privileged: true` is refused: a process run in a container
+has no privileged mode. Changing a service's hooks recreates its container on the next `up`.
+Orchard does not run hooks.
 
 **Not yet:** `entrypoint`, named `volumes`, attaching to multiple networks, `profiles`,
 `include`, `healthcheck`, and `depends_on` with conditions. `pull_policy` and `platform` are

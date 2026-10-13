@@ -63,6 +63,19 @@ enum Runtime {
             Output.step(index + 1, of: total, operation.summary)
             do {
                 try await perform(operation)
+            } catch let failure as HookFailure {
+                let later = total - index - 1
+                guard failure.hook.failureIsFatal else {
+                    // The container is being stopped either way, so a failed `pre_stop` is
+                    // worth saying and not worth leaving the container up for.
+                    Output.warning(failure.description + "\n  carrying on with the stop")
+                    continue
+                }
+                throw ComposeError(
+                    failure.description
+                        + "\n  `\(failure.hook.containerName)` was left running"
+                        + (later > 0 ? "; \(later) later step(s) were not attempted" : "")
+                )
             } catch let error as ComposeError {
                 throw error
             } catch {
@@ -97,6 +110,63 @@ enum Runtime {
             try await ContainerClient().stop(id: reference.containerName)
         case .removeContainer(let reference):
             try await ContainerClient().delete(id: reference.containerName, force: true)
+        case .runHook(let operation):
+            try await runHook(operation)
+        }
+    }
+
+    /// A hook runs the way `container exec` runs anything: a new process in the running
+    /// container, starting from the container's own process configuration so that whatever
+    /// the hook does not set (environment, directory, user) is what the service runs with.
+    ///
+    /// Output is shown as it arrives, under the step, as build output is.
+    private static func runHook(_ operation: HookOperation) async throws {
+        let client = ContainerClient()
+        let container = try await client.get(id: operation.containerName)
+        guard container.status == .running else {
+            throw ComposeError(
+                "`\(operation.containerName)` is not running, so "
+                    + "\(operation.phase.rawValue)[\(operation.index)] cannot run in it"
+            )
+        }
+        guard let executable = operation.command.first else {
+            throw ComposeError("\(operation.phase.rawValue)[\(operation.index)] in service `\(operation.service)` has no command")
+        }
+
+        var configuration = container.configuration.initProcess
+        configuration.executable = executable
+        configuration.arguments = Array(operation.command.dropFirst())
+        configuration.terminal = false
+        configuration.environment.append(contentsOf: operation.environment)
+        if let workingDirectory = operation.workingDirectory {
+            configuration.workingDirectory = workingDirectory
+        }
+        if let user = operation.user {
+            configuration.user = .raw(userString: user)
+        }
+
+        let output = Pipe()
+        let errors = Pipe()
+        let process = try await client.createProcess(
+            containerId: container.id,
+            processId: UUID().uuidString.lowercased(),
+            configuration: configuration,
+            stdio: [nil, output.fileHandleForWriting, errors.fileHandleForWriting]
+        )
+        // The runtime holds its own copies now. Ours have to go, or the reads below never
+        // see the end of the stream.
+        try? output.fileHandleForWriting.close()
+        try? errors.fileHandleForWriting.close()
+        try await process.start()
+
+        let transcript = HookTranscript()
+        async let relayedOutput: Void = transcript.relay(output.fileHandleForReading)
+        async let relayedErrors: Void = transcript.relay(errors.fileHandleForReading)
+        let status = try await process.wait()
+        _ = await (relayedOutput, relayedErrors)
+
+        guard status == 0 else {
+            throw HookFailure(hook: operation, status: status, lastLines: transcript.lastLines)
         }
     }
 
@@ -325,6 +395,55 @@ enum Runtime {
             }
         }
         return error.localizedDescription
+    }
+}
+
+/// A hook that ran and exited non-zero. Whether that stops the plan is the plan's decision,
+/// carried on the operation, so this only says what happened.
+private struct HookFailure: Error, CustomStringConvertible {
+    let hook: HookOperation
+    let status: Int32
+    let lastLines: [String]
+
+    var description: String {
+        var text = "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` exited \(status)"
+        if !lastLines.isEmpty {
+            text += "\n  its last output was:"
+            for line in lastLines { text += "\n    \(line)" }
+        }
+        return text
+    }
+}
+
+/// Shows a hook's output line by line as it arrives, and keeps the end of it for the error
+/// if the hook fails. stdout and stderr both land on stdout here, interleaved as they come,
+/// because the order things happened in is the useful part.
+private final class HookTranscript: @unchecked Sendable {
+    private static let kept = 20
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var lastLines: [String] {
+        lock.withLock { lines }
+    }
+
+    private func keep(_ line: String) {
+        lock.withLock {
+            lines.append(line)
+            if lines.count > Self.kept { lines.removeFirst(lines.count - Self.kept) }
+        }
+    }
+
+    func relay(_ handle: FileHandle) async {
+        do {
+            for try await line in handle.bytes.lines {
+                Output.line("        \(line)")
+                keep(line)
+            }
+        } catch {
+            // A stream that breaks part way loses the rest of the output, not the hook's
+            // exit status, which is what decides the outcome.
+        }
     }
 }
 

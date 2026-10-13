@@ -54,6 +54,10 @@ extension FileParser {
                 service.resources = try parseDeploy(valueNode, service: name, path: "\(base).deploy")
             case "depends_on":
                 service.dependsOn = try parseDependsOn(valueNode, service: name, path: "\(base).depends_on")
+            case "post_start":
+                service.postStart = try parseHooks(valueNode, service: name, key: "post_start", path: "\(base).post_start")
+            case "pre_stop":
+                service.preStop = try parseHooks(valueNode, service: name, key: "pre_stop", path: "\(base).pre_stop")
             case "restart":
                 // The only restart policy this stack has is the absence of one, so `no` is
                 // honoured exactly, by doing nothing. Reporting it would be reporting
@@ -150,6 +154,74 @@ extension FileParser {
             return arguments
         }
         return Self.shellSplit(try string(node, path: path))
+    }
+
+    // MARK: - hooks
+
+    /// `post_start` and `pre_stop`: a list of commands to run inside the container, each a
+    /// mapping. A hook's `command` and `environment` take the same forms as the service's own.
+    private mutating func parseHooks(_ node: Node, service: String, key: String, path: String) throws -> [Service.Hook] {
+        if node.null != nil { return [] }
+        var hooks: [Service.Hook] = []
+        for (index, element) in try sequence(node, path: path).enumerated() {
+            let hookPath = "\(path)[\(index)]"
+            let hookKey = "\(key)[\(index)]"
+            var command: [String]?
+            var hook = Service.Hook(command: [])
+            for (keyNode, valueNode) in try mapping(element, path: hookPath) {
+                guard let field = keyNode.scalar?.string else {
+                    throw ParseError(reason: .wrongShape, problem: "`\(hookPath)` keys must be plain strings", mark: mark(keyNode))
+                }
+                switch field {
+                case "command":
+                    command = try parseCommand(valueNode, path: "\(hookPath).command")
+                case "environment":
+                    for pair in try parseEnvironment(valueNode, path: "\(hookPath).environment") {
+                        hook.environment[pair.key] = pair.value
+                    }
+                case "working_dir":
+                    hook.workingDirectory = try string(valueNode, path: "\(hookPath).working_dir")
+                case "user":
+                    hook.user = try string(valueNode, path: "\(hookPath).user")
+                case "privileged":
+                    // `false` asks for what a hook gets anyway. `true` asks for a mode a
+                    // process run in a container does not have, and is refused like the
+                    // service-level key.
+                    guard let privileged = valueNode.bool else {
+                        throw ParseError(
+                            reason: .wrongShape,
+                            problem: "`\(hookPath).privileged` must be true or false",
+                            mark: mark(valueNode),
+                            path: "\(hookPath).privileged"
+                        )
+                    }
+                    if privileged {
+                        note(
+                            key: "\(hookKey).privileged",
+                            service: service,
+                            node: valueNode,
+                            support: .unsupported(
+                                severity: .behavioural,
+                                reason: "a hook runs as a process in the container, which has no privileged mode"
+                            )
+                        )
+                    }
+                default:
+                    noteUnknown(key: "\(hookKey).\(field)", service: service, node: keyNode)
+                }
+            }
+            guard let command, !command.isEmpty else {
+                throw ParseError(
+                    reason: .missingKey,
+                    problem: "`\(hookPath)` has no `command`",
+                    mark: mark(element),
+                    path: hookPath
+                )
+            }
+            hook.command = command
+            hooks.append(hook)
+        }
+        return hooks
     }
 
     // MARK: - environment

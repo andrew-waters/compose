@@ -151,6 +151,8 @@ public enum KeySupportTable {
         "dns": .supported,
         "dns_search": .supported,
         "dns_opt": .supported,
+        "post_start": .supported,
+        "pre_stop": .supported,
         "privileged": .unsupported(severity: .behavioural, reason: "there is no privileged mode"),
         "network_mode": .unsupported(severity: .behavioural, reason: "only user-defined networks are attachable"),
         "stdin_open": .unsupported(severity: .cosmetic, reason: "attaching to a started container is not planned here"),

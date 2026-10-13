@@ -13,6 +13,7 @@ public enum Operation: Sendable, Equatable {
     case startContainer(ContainerReference)
     case stopContainer(ContainerReference)
     case removeContainer(ContainerReference)
+    case runHook(HookOperation)
 
     /// The service this operation is part of, for per-service progress.
     public var service: String? {
@@ -27,6 +28,8 @@ public enum Operation: Sendable, Equatable {
             return operation.service
         case .startContainer(let reference), .stopContainer(let reference), .removeContainer(let reference):
             return reference.service
+        case .runHook(let operation):
+            return operation.service
         }
     }
 
@@ -41,6 +44,8 @@ public enum Operation: Sendable, Equatable {
         case .startContainer(let reference): return "start \(reference.containerName)"
         case .stopContainer(let reference): return "stop \(reference.containerName)"
         case .removeContainer(let reference): return "remove \(reference.containerName)"
+        case .runHook(let operation):
+            return "run \(operation.phase.rawValue)[\(operation.index)] in \(operation.containerName)"
         }
     }
 }
@@ -184,6 +189,53 @@ public struct CreateOperation: Sendable, Equatable {
         self.dnsOptions = dnsOptions
         self.cpus = cpus
         self.memoryBytes = memoryBytes
+    }
+}
+
+/// One `post_start` or `pre_stop` command, run inside a container that is already running.
+public struct HookOperation: Sendable, Equatable {
+    public enum Phase: String, Sendable, Equatable {
+        case postStart = "post_start"
+        case preStop = "pre_stop"
+    }
+
+    public let service: String
+    public let containerName: String
+    public let phase: Phase
+    /// Where the hook sits in the service's list, for naming it in progress and errors.
+    public let index: Int
+    public let command: [String]
+    /// Sorted `KEY=value`, added to the container's own environment.
+    public let environment: [String]
+    /// `nil` keeps the container process's working directory.
+    public let workingDirectory: String?
+    /// `nil` keeps the container process's user.
+    public let user: String?
+    /// Whether a non-zero exit stops the plan. A `post_start` that fails fails `up`; a
+    /// `pre_stop` that fails is reported and the stop goes ahead, since the container is going
+    /// either way.
+    public let failureIsFatal: Bool
+
+    public init(
+        service: String,
+        containerName: String,
+        phase: Phase,
+        index: Int,
+        command: [String],
+        environment: [String] = [],
+        workingDirectory: String? = nil,
+        user: String? = nil,
+        failureIsFatal: Bool
+    ) {
+        self.service = service
+        self.containerName = containerName
+        self.phase = phase
+        self.index = index
+        self.command = command
+        self.environment = environment
+        self.workingDirectory = workingDirectory
+        self.user = user
+        self.failureIsFatal = failureIsFatal
     }
 }
 

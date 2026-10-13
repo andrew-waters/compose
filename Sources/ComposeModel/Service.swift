@@ -98,6 +98,33 @@ public struct Service: Sendable, Hashable, Identifiable {
         public var isEmpty: Bool { cpus == nil && memoryBytes == nil }
     }
 
+    /// One entry under `post_start` or `pre_stop`: a command run inside the service's
+    /// container, after it starts or before it stops.
+    ///
+    /// `privileged` is not here. `false` asks for nothing and is dropped; `true` is refused at
+    /// parse time, because a process run in a container has no privileged mode.
+    public struct Hook: Sendable, Hashable {
+        public var command: [String]
+        /// Added to the container's own environment for this one process.
+        public var environment: [String: String]
+        /// `nil` runs the hook where the container's process runs.
+        public var workingDirectory: String?
+        /// `nil` runs the hook as the container's process user.
+        public var user: String?
+
+        public init(
+            command: [String],
+            environment: [String: String] = [:],
+            workingDirectory: String? = nil,
+            user: String? = nil
+        ) {
+            self.command = command
+            self.environment = environment
+            self.workingDirectory = workingDirectory
+            self.user = user
+        }
+    }
+
     public var id: String { name }
 
     /// The key this service sits under in `services:`.
@@ -121,6 +148,10 @@ public struct Service: Sendable, Hashable, Identifiable {
     public var resources: Resources?
     /// Service names this one must start after, already checked to exist.
     public var dependsOn: [String]
+    /// Run in declared order once the container has started.
+    public var postStart: [Hook]
+    /// Run in declared order before a running container is stopped.
+    public var preStop: [Hook]
     public var extensions: [String: ExtensionValue]
 
     public init(
@@ -140,6 +171,8 @@ public struct Service: Sendable, Hashable, Identifiable {
         dnsOptions: [String] = [],
         resources: Resources? = nil,
         dependsOn: [String] = [],
+        postStart: [Hook] = [],
+        preStop: [Hook] = [],
         extensions: [String: ExtensionValue] = [:]
     ) {
         self.name = name
@@ -158,6 +191,8 @@ public struct Service: Sendable, Hashable, Identifiable {
         self.dnsOptions = dnsOptions
         self.resources = resources
         self.dependsOn = dependsOn
+        self.postStart = postStart
+        self.preStop = preStop
         self.extensions = extensions
     }
 }
@@ -200,6 +235,21 @@ extension Service {
         if let resources {
             if let cpus = resources.cpus { lines.append("cpus=\(cpus)") }
             if let memory = resources.memoryBytes { lines.append("memory=\(memory)") }
+        }
+        // Hooks are in declared order, since that is the order they run in. A service with none
+        // adds no lines at all, so containers created before hooks existed keep their hash.
+        for (phase, hooks) in [("post_start", postStart), ("pre_stop", preStop)] {
+            for (index, hook) in hooks.enumerated() {
+                let prefix = "\(phase)[\(index)]"
+                lines.append("\(prefix).command=\(hook.command.joined(separator: "\u{1}"))")
+                for key in hook.environment.keys.sorted() {
+                    lines.append("\(prefix).env.\(key)=\(hook.environment[key] ?? "")")
+                }
+                if let workingDirectory = hook.workingDirectory {
+                    lines.append("\(prefix).working_dir=\(workingDirectory)")
+                }
+                if let user = hook.user { lines.append("\(prefix).user=\(user)") }
+            }
         }
         for key in extensions.keys.sorted() {
             lines.append("x.\(key)=\(extensions[key]?.canonicalDescription ?? "")")
