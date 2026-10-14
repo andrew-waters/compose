@@ -3,7 +3,7 @@
   "branch" : "15-containers-are-never-registered-in-apple",
   "issue" : "andrew-waters/compose#15",
   "pullRequests" : [
-
+    "https://github.com/andrew-waters/compose/pull/16"
   ],
   "repos" : [
 
