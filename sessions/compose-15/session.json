@@ -1,0 +1,15 @@
+{
+  "box" : "Andrew’s MacBook Air",
+  "branch" : "15-containers-are-never-registered-in-apple",
+  "issue" : "andrew-waters/compose#15",
+  "pullRequests" : [
+
+  ],
+  "repos" : [
+
+  ],
+  "startedAt" : "2026-10-14T14:22:39Z",
+  "startedBy" : "andrew-waters",
+  "title" : "Containers are never registered in Apple container's DNS: hostname lacks the trailing dot",
+  "url" : "https://github.com/andrew-waters/compose/issues/15"
+}
