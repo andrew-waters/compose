@@ -98,6 +98,26 @@ the machine, so a container is reachable as `<project>-<service>` rather than as
 Compose's own naming needs per-network namespacing, which is
 [apple/container#1809](https://github.com/apple/container/issues/1809).
 
+A container is registered in container's DNS only under a qualified name. A `container_name`
+with a dot in it, such as `postgres.stack`, is used as it is. Any other name is registered as
+`<name>.<domain>` when a default domain is set in `~/.config/container/config.toml`, and is
+not resolvable by name at all when none is:
+
+```toml
+[dns]
+domain = "stack"
+```
+
+The domain has to exist (`sudo container system dns create stack`) and container has to be
+restarted to read it. The older `com.apple.container.defaults` setting is ignored by container
+1.x ([apple/container#1794](https://github.com/apple/container/issues/1794)). Even once a name
+resolves, traffic only flows between containers on the same network: a name looked up from
+another network resolves, but the connection gets no answer.
+
+Containers created by an earlier version of the plugin were registered under a bare name and
+cannot be resolved. The hostname is not part of the service hash, so `up` does not replace them
+by itself; recreate them once with `container compose up --force-recreate`, or `down` then `up`.
+
 ## Using it
 
 Every release ships the plugin directory built and packaged exactly as it is installed, so

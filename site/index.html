@@ -150,7 +150,8 @@
                 <td><span class="m m--yes">yes</span> <span class="why"><code>db</code></span></td>
                 <td><span class="m m--part">partial</span> <span class="why">hostnames are unique per machine, so it is
                   <code>myapp-db</code> rather than <code>db</code>
-                  (<a href="https://github.com/apple/container/issues/1809">#1809</a>)</span></td>
+                  (<a href="https://github.com/apple/container/issues/1809">#1809</a>); it resolves only once qualified (a
+                  dotted <code>container_name</code>, or the default DNS domain), and connects only within one network</span></td>
               </tr>
               <tr>
                 <th scope="row"><code>depends_on</code> conditions</th>
@@ -380,6 +381,10 @@
             <p>Hostnames have to be unique across every container on the machine, so <code>db</code> is reachable as
               <code>myapp-db</code>, not <code>db</code>. Compose&rsquo;s own naming needs per-network namespacing:
               <a href="https://github.com/apple/container/issues/1809">#1809</a>.</p>
+            <p>A name is registered in container&rsquo;s DNS only when it is qualified: a <code>container_name</code>
+              with a dot in it is used as it is, and any other name becomes <code>myapp-db.&lt;domain&gt;</code> once
+              <code>[dns] domain</code> is set in <code>~/.config/container/config.toml</code>. Traffic flows only
+              between containers on the same network.</p>
           </div>
           <div class="callout info">
             <h3>Upgrading container wipes plugins</h3>

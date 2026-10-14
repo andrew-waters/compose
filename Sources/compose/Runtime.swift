@@ -386,9 +386,13 @@ enum Runtime {
         // Naming nameservers explicitly matters on a project network, where the gateway does
         // not answer: a service that has to resolve anything needs `dns:` in the file until
         // the runtime serves DNS on networks it did not create itself.
+        //
+        // The default domain from container's config.toml goes in too, as `container run`
+        // sends it, so a container can reach another on the same domain by its short name.
+        let dnsDomain = systemConfig.dns.domain
         configuration.dns = ContainerConfiguration.DNSConfiguration(
             nameservers: operation.dns,
-            domain: nil,
+            domain: dnsDomain,
             searchDomains: operation.dnsSearch,
             options: operation.dnsOptions
         )
@@ -401,7 +405,11 @@ enum Runtime {
                 // two projects with a `db` service could not both exist. Until
                 // apple/container#1809 gives networks their own namespace, `<project>-<service>`
                 // is the name a service answers to.
-                options: AttachmentOptions(hostname: operation.containerName, macAddress: nil, mtu: 1280)
+                options: AttachmentOptions(
+                    hostname: hostname(containerName: operation.containerName, dnsDomain: dnsDomain),
+                    macAddress: nil,
+                    mtu: 1280
+                )
             )
         ]
 
@@ -413,6 +421,20 @@ enum Runtime {
     }
 
     // MARK: - Helpers
+
+    /// The hostname a container is attached with, built as `container run` builds it.
+    ///
+    /// The runtime's DNS looks a name up by exact match against the attachment's hostname,
+    /// and the name it looks up is fully qualified with a trailing dot. A bare name is never
+    /// found, so a container created with one is unreachable by name. A name with a dot in it
+    /// is taken as already qualified; one without gets the default domain, when there is one.
+    /// With neither there is nothing to qualify it with, and the bare name is what the CLI
+    /// uses too.
+    static func hostname(containerName: String, dnsDomain: String?) -> String {
+        if containerName.contains(".") { return "\(containerName)." }
+        if let dnsDomain { return "\(containerName).\(dnsDomain)." }
+        return containerName
+    }
 
     /// Runtime errors arrive wrapped and verbose. Take the message if there is one.
     static func friendly(_ error: any Error) -> String {
