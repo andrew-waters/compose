@@ -1,6 +1,7 @@
 {
   "box" : "Andrew’s MacBook Air",
   "branch" : "15-containers-are-never-registered-in-apple",
+  "finishedAt" : "2026-10-14T18:18:47Z",
   "issue" : "andrew-waters/compose#15",
   "pullRequests" : [
     "https://github.com/andrew-waters/compose/pull/16"
