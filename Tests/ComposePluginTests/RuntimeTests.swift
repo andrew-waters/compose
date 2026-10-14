@@ -90,6 +90,29 @@ struct FriendlyErrorTests {
     }
 }
 
+@Suite("The hostname a container registers in DNS")
+struct HostnameTests {
+    @Test("A name with a dot in it is already qualified and gets only the trailing dot")
+    func qualifiedName() {
+        #expect(Runtime.hostname(containerName: "postgres.stack", dnsDomain: nil) == "postgres.stack.")
+    }
+
+    @Test("A qualified name is not given the default domain a second time")
+    func qualifiedNameWithDomain() {
+        #expect(Runtime.hostname(containerName: "postgres.stack", dnsDomain: "stack") == "postgres.stack.")
+    }
+
+    @Test("An unqualified name is put under the default domain")
+    func unqualifiedNameWithDomain() {
+        #expect(Runtime.hostname(containerName: "shop-db", dnsDomain: "stack") == "shop-db.stack.")
+    }
+
+    @Test("With no default domain an unqualified name is left bare, as the CLI leaves it")
+    func unqualifiedNameWithoutDomain() {
+        #expect(Runtime.hostname(containerName: "shop-db", dnsDomain: nil) == "shop-db")
+    }
+}
+
 @Suite("Relaying hook output")
 struct HookTranscriptTests {
     @Test("Every line is relayed, and only the last twenty are kept for an error")
