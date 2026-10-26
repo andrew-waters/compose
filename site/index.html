@@ -187,10 +187,15 @@
                 <td><span class="m m--soon">not yet</span></td>
               </tr>
               <tr>
-                <th scope="row"><code>pull_policy</code>, <code>platform</code></th>
+                <th scope="row"><code>platform</code></th>
                 <td><span class="m m--yes">yes</span></td>
-                <td><span class="m m--part">partial</span> <span class="why">an image is pulled when it is missing, and
-                  everything on this stack is linux/arm64</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">linux/amd64 runs under Rosetta on Apple
+                  silicon</span></td>
+              </tr>
+              <tr>
+                <th scope="row"><code>pull_policy</code></th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--part">partial</span> <span class="why">an image is pulled when it is missing</span></td>
               </tr>
               <tr>
                 <th scope="row"><code>ps</code>, <code>logs</code>, <code>exec</code>, <code>stop</code>, <code>start</code></th>

@@ -4,7 +4,7 @@ services:
     restart: always
     user: "1000:1000"
     entrypoint: /bin/sh
-    platform: linux/arm64
+    pull_policy: always
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
     privileged: true

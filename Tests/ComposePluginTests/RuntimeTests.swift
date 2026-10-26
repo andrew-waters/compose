@@ -1,4 +1,5 @@
 import ComposePlanner
+import ContainerizationOCI
 import Foundation
 import Testing
 
@@ -144,5 +145,17 @@ struct HookTranscriptTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(transcript.lastLines == ["before"])
         try pipe.fileHandleForWriting.close()
+    }
+}
+
+@Suite("Running another platform")
+struct PlatformRuntimeTests {
+    @Test("Rosetta is asked for only for amd64 on an arm64 host")
+    func rosettaRule() {
+        let arm64 = ContainerizationOCI.Platform(arch: "arm64", os: "linux")
+        let amd64 = ContainerizationOCI.Platform(arch: "amd64", os: "linux")
+        #expect(Runtime.needsRosetta(amd64, host: arm64))
+        #expect(!Runtime.needsRosetta(arm64, host: arm64))
+        #expect(!Runtime.needsRosetta(amd64, host: amd64))
     }
 }

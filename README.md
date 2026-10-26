@@ -55,8 +55,13 @@ The dividing line is what container's own create surface can already express.
 
 **Supported:** `image`, `build`, `container_name`, `command`, `environment`, `env_file`,
 `working_dir`, `ports`, bind `volumes`, `labels`, `networks`, `dns`, `dns_search`,
-`dns_opt`, `deploy.resources`, `depends_on` in its list form, and the `post_start` and
-`pre_stop` lifecycle hooks.
+`dns_opt`, `deploy.resources`, `depends_on` in its list form, `platform`, and the
+`post_start` and `pre_stop` lifecycle hooks.
+
+`platform` takes `os/arch` or `os/arch/variant`, such as `linux/amd64`. The image is pulled,
+built and run as that platform; on Apple silicon a `linux/amd64` service runs under Rosetta,
+which has to be installed (`softwareupdate --install-rosetta`). A service without it runs as
+the host's platform, as before.
 
 Hooks run inside the service's container with their `command`, `environment`, `working_dir`
 and `user`; anything a hook leaves out is what the container's own process runs with. `up`
@@ -76,9 +81,8 @@ filled in from your shell when the file is read; write `$$VAR` for the container
 variable. Orchard does not run hooks.
 
 **Not yet:** `entrypoint`, named `volumes`, attaching to multiple networks, `profiles`,
-`include`, `healthcheck`, and `depends_on` with conditions. `pull_policy` and `platform` are
-read but not honoured: an image is pulled when it is missing, and everything on this stack is
-linux/arm64.
+`include`, `healthcheck`, and `depends_on` with conditions. `pull_policy` is read but not
+honoured: an image is pulled when it is missing.
 
 **Not possible today:** `restart`, `user`, `cap_add`, `devices`, `tmpfs`, `ulimits`,
 `secrets`, `configs`, `extra_hosts`, `privileged`, `network_mode`. These need runtime support

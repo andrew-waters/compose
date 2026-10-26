@@ -110,13 +110,10 @@ public enum KeySupportTable {
         "networks": .supported,
         "deploy": .supported,
         "depends_on": .supported,
+        "platform": .supported,
         "pull_policy": .deferred(
             severity: .cosmetic,
             reason: "an image is pulled when it is not already here; `always` and `never` are not honoured"
-        ),
-        "platform": .deferred(
-            severity: .cosmetic,
-            reason: "every container on this stack is linux/arm64 today"
         ),
         "entrypoint": .deferred(
             severity: .behavioural,

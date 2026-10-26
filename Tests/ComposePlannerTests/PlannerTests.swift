@@ -372,6 +372,59 @@ struct CreateOperationTests {
         #expect(create.cpus == 0.5)
         #expect(create.memoryBytes == 512 << 20)
     }
+
+    @Test("A service's platform reaches its pull, its build and its container")
+    func platformCarried() throws {
+        let file = try Sample.file(
+            """
+            services:
+              web:
+                image: nginx
+                platform: linux/amd64
+              api:
+                build: ./api
+                platform: linux/amd64
+            """
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState())
+        let project = Sample.project
+        #expect(plan.operations.contains(
+            .pullImage(PullOperation(service: "web", imageReference: "nginx", platform: "linux/amd64"))
+        ))
+        #expect(plan.operations.contains(
+            .buildImage(BuildOperation(
+                service: "api",
+                imageReference: "shop-api:latest",
+                context: "/project/api",
+                platform: "linux/amd64"
+            ))
+        ))
+        let web = try #require(plan.createOperations.first { $0.service == "web" })
+        let webService = try #require(file.services["web"])
+        #expect(web == CreateOperation(
+            service: "web",
+            containerName: "shop-web",
+            imageReference: "nginx",
+            environment: [],
+            command: [],
+            workingDirectory: nil,
+            mounts: [],
+            ports: [],
+            networkName: "shop_default",
+            labels: project.labels(for: webService),
+            cpus: nil,
+            memoryBytes: nil,
+            platform: "linux/amd64"
+        ))
+    }
+
+    @Test("A service with no platform leaves the choice to the runtime")
+    func noPlatform() throws {
+        let file = try Sample.file("services:\n  web:\n    image: nginx\n")
+        let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState())
+        #expect(plan.operations.contains(.pullImage(PullOperation(service: "web", imageReference: "nginx"))))
+        #expect(plan.createOperations.first?.platform == nil)
+    }
 }
 
 @Suite("Refusing to make a plan")
@@ -828,6 +881,15 @@ struct HookPlanningTests {
 
         let up = try Planner.up(file: file, project: Sample.project, state: state)
         #expect(up.operations.map(\.summary) == ["stop shop-web", "remove shop-web"])
+    }
+
+    @Test("A platform changes the hash only when it is set")
+    func platformInTheHash() throws {
+        let plain = Service(name: "web", image: "nginx")
+        #expect(plain.canonicalDescription == "service=web\nimage=nginx")
+        let amd64 = Service(name: "web", image: "nginx", platform: "linux/amd64")
+        #expect(amd64.canonicalDescription == "service=web\nimage=nginx\nplatform=linux/amd64")
+        #expect(ProjectIdentity.hash(of: amd64) != ProjectIdentity.hash(of: plain))
     }
 
     @Test("Editing a hook changes the hash; a service with none hashes as it always did")
