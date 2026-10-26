@@ -70,6 +70,8 @@ public struct BuildOperation: Sendable, Equatable {
     public let dockerfile: String?
     public let arguments: [String: String]
     public let target: String?
+    /// `os/arch[/variant]` to build for, or `nil` for the host's.
+    public let platform: String?
 
     public init(
         service: String,
@@ -77,7 +79,8 @@ public struct BuildOperation: Sendable, Equatable {
         context: String,
         dockerfile: String? = nil,
         arguments: [String: String] = [:],
-        target: String? = nil
+        target: String? = nil,
+        platform: String? = nil
     ) {
         self.service = service
         self.imageReference = imageReference
@@ -85,16 +88,20 @@ public struct BuildOperation: Sendable, Equatable {
         self.dockerfile = dockerfile
         self.arguments = arguments
         self.target = target
+        self.platform = platform
     }
 }
 
 public struct PullOperation: Sendable, Equatable {
     public let service: String
     public let imageReference: String
+    /// The one variant to pull, or `nil` for the runtime's default.
+    public let platform: String?
 
-    public init(service: String, imageReference: String) {
+    public init(service: String, imageReference: String, platform: String? = nil) {
         self.service = service
         self.imageReference = imageReference
+        self.platform = platform
     }
 }
 
@@ -156,6 +163,9 @@ public struct CreateOperation: Sendable, Equatable {
     public let dnsOptions: [String]
     public let cpus: Double?
     public let memoryBytes: UInt64?
+    /// `os/arch[/variant]` the container runs as, or `nil` for the host's. A platform that is
+    /// not the host's architecture runs under Rosetta.
+    public let platform: String?
 
     public init(
         service: String,
@@ -172,7 +182,8 @@ public struct CreateOperation: Sendable, Equatable {
         dnsSearch: [String] = [],
         dnsOptions: [String] = [],
         cpus: Double?,
-        memoryBytes: UInt64?
+        memoryBytes: UInt64?,
+        platform: String? = nil
     ) {
         self.service = service
         self.containerName = containerName
@@ -189,6 +200,7 @@ public struct CreateOperation: Sendable, Equatable {
         self.dnsOptions = dnsOptions
         self.cpus = cpus
         self.memoryBytes = memoryBytes
+        self.platform = platform
     }
 }
 

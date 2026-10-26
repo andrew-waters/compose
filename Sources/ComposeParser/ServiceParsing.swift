@@ -52,6 +52,8 @@ extension FileParser {
                 service.dnsOptions = try parseStringOrList(valueNode, path: "\(base).dns_opt")
             case "deploy":
                 service.resources = try parseDeploy(valueNode, service: name, path: "\(base).deploy")
+            case "platform":
+                service.platform = try parsePlatform(valueNode, path: "\(base).platform")
             case "depends_on":
                 service.dependsOn = try parseDependsOn(valueNode, service: name, path: "\(base).depends_on")
             case "post_start":

@@ -213,6 +213,7 @@ enum Runtime {
         let printer = PullPhasePrinter()
         _ = try await ClientImage.pull(
             reference: operation.imageReference,
+            platform: try operation.platform.map(ContainerizationOCI.Platform.init(from:)),
             containerSystemConfig: try await ConfigurationLoader.load(),
             progressUpdate: { events in printer.handle(events) }
         )
@@ -227,9 +228,9 @@ enum Runtime {
         var arguments = [
             "build",
             "--tag", operation.imageReference,
-            // Everything on this stack is a linux/arm64 guest, which is why `platform` in a
-            // compose file is reported and ignored rather than passed through.
-            "--arch", "arm64",
+            // The service's platform when it names one, so a `platform: linux/amd64` service
+            // gets an image it can run. Otherwise arm64, the host's, as before.
+            operation.platform.map { "--platform=\($0)" } ?? "--arch=arm64",
             "--progress", "plain",
         ]
         if let dockerfile = operation.dockerfile {
@@ -289,6 +290,15 @@ enum Runtime {
         return created
     }
 
+    /// Whether a container of this platform runs under Rosetta, which is the rule
+    /// `container run` applies: an amd64 container on an arm64 host.
+    static func needsRosetta(
+        _ platform: ContainerizationOCI.Platform,
+        host: ContainerizationOCI.Platform = .current
+    ) -> Bool {
+        host.architecture == "arm64" && platform.architecture == "amd64"
+    }
+
     /// The `container` CLI that ran this plugin.
     ///
     /// A plugin lives at `<root>/libexec/container-plugins/<name>/bin/<name>`, so the CLI is
@@ -310,12 +320,16 @@ enum Runtime {
             Output.note("        created \(path)")
         }
         let systemConfig = try await ConfigurationLoader.load()
+        let platform = try operation.platform.map(ContainerizationOCI.Platform.init(from:)) ?? .current
+        // Fetching with the platform pulls that variant when the stored image lacks it.
         let image = try await ClientImage.fetch(
             reference: operation.imageReference,
+            platform: platform,
             containerSystemConfig: systemConfig
         )
-        let platform = ContainerizationOCI.Platform.current
         _ = try await image.getCreateSnapshot(platform: platform)
+        // The kernel is always the host's: only the container's userspace is another
+        // architecture, and Rosetta runs that. `container run --platform` does the same.
         let kernel = try await ClientKernel.getDefaultKernel(for: .current)
         let imageConfig = try await image.config(for: platform).config
 
@@ -368,6 +382,9 @@ enum Runtime {
         configuration.mounts = mounts
         configuration.publishedPorts = ports
         configuration.labels = operation.labels
+        configuration.platform = platform
+        configuration.rosetta = Runtime.needsRosetta(platform)
+        configuration.runtimeHandler = "container-runtime-\(platform.os)"
         // A compose file can ask for half a core; a VM cannot have one. Round up, because the
         // number is a limit and rounding down would be a quieter kind of wrong.
         if let cpus = operation.cpus {

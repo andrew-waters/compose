@@ -56,6 +56,26 @@ extension FileParser {
         }
     }
 
+    /// `os/arch` or `os/arch/variant`, lowercased, which is what the runtime matches an
+    /// image's platforms against. Anything else is refused here rather than at create time,
+    /// where the error would name the image instead of the line.
+    mutating func parsePlatform(_ node: Node, path: String) throws -> String {
+        let platform = try string(node, path: path).trimmingCharacters(in: .whitespaces).lowercased()
+        let parts = platform.split(separator: "/", omittingEmptySubsequences: false)
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_-")
+        guard (2...3).contains(parts.count),
+              parts.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy(allowed.contains) })
+        else {
+            throw ParseError(
+                reason: .invalidValue,
+                problem: "`\(platform)` is not a platform; write it as os/arch, such as linux/amd64",
+                mark: mark(node),
+                path: path
+            )
+        }
+        return platform
+    }
+
     // MARK: - Findings
 
     mutating func note(key: String, service: String? = nil, node: Node, support: KeySupport) {

@@ -59,7 +59,11 @@ let package = Package(
         // hook means, how a runtime error reads, how hook output is relayed.
         .testTarget(
             name: "ComposePluginTests",
-            dependencies: ["compose", "ComposePlanner"]
+            dependencies: [
+                "compose",
+                "ComposePlanner",
+                .product(name: "ContainerizationOCI", package: "containerization"),
+            ]
         ),
     ]
 )

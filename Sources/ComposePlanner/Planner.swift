@@ -231,12 +231,15 @@ public enum Planner {
                                 context: build.context,
                                 dockerfile: build.dockerfile,
                                 arguments: build.args,
-                                target: build.target
+                                target: build.target,
+                                platform: service.platform
                             )
                         )
                     )
                 } else if shouldPull(image, state: state, policy: options.pullPolicy) {
-                    operations.append(.pullImage(PullOperation(service: name, imageReference: image)))
+                    operations.append(
+                        .pullImage(PullOperation(service: name, imageReference: image, platform: service.platform))
+                    )
                 }
                 if action == .recreate, let existing = existingByService[name] {
                     let old = ContainerReference(containerName: existing.name, service: name)
@@ -624,7 +627,8 @@ public enum Planner {
             dnsSearch: service.dnsSearch,
             dnsOptions: service.dnsOptions,
             cpus: service.resources?.cpus,
-            memoryBytes: service.resources?.memoryBytes
+            memoryBytes: service.resources?.memoryBytes,
+            platform: service.platform
         )
     }
 }

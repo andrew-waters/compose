@@ -146,6 +146,9 @@ public struct Service: Sendable, Hashable, Identifiable {
     public var dnsSearch: [String]
     public var dnsOptions: [String]
     public var resources: Resources?
+    /// `os/arch[/variant]`, as the file wrote it. `nil` leaves the choice to the runtime,
+    /// which is the host's platform.
+    public var platform: String?
     /// Service names this one must start after, already checked to exist.
     public var dependsOn: [String]
     /// Run in declared order once the container has started.
@@ -170,6 +173,7 @@ public struct Service: Sendable, Hashable, Identifiable {
         dnsSearch: [String] = [],
         dnsOptions: [String] = [],
         resources: Resources? = nil,
+        platform: String? = nil,
         dependsOn: [String] = [],
         postStart: [Hook] = [],
         preStop: [Hook] = [],
@@ -190,6 +194,7 @@ public struct Service: Sendable, Hashable, Identifiable {
         self.dnsSearch = dnsSearch
         self.dnsOptions = dnsOptions
         self.resources = resources
+        self.platform = platform
         self.dependsOn = dependsOn
         self.postStart = postStart
         self.preStop = preStop
@@ -236,6 +241,8 @@ extension Service {
             if let cpus = resources.cpus { lines.append("cpus=\(cpus)") }
             if let memory = resources.memoryBytes { lines.append("memory=\(memory)") }
         }
+        // Only when set, so a service that never named a platform keeps the hash it had.
+        if let platform { lines.append("platform=\(platform)") }
         // Hooks are in declared order, since that is the order they run in. A service with none
         // adds no lines at all, so containers created before hooks existed keep their hash.
         for (phase, hooks) in [("post_start", postStart), ("pre_stop", preStop)] {

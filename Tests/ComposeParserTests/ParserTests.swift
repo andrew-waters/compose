@@ -137,9 +137,9 @@ struct FindingTests {
         #expect(byKey["privileged"] != nil)
 
         // Cosmetic keys are reported too, and do not block.
-        let platform = try #require(byKey["platform"]?.first)
-        #expect(platform.severity == .cosmetic)
-        #expect(!result.blockingFindings.contains(platform))
+        let pullPolicy = try #require(byKey["pull_policy"]?.first)
+        #expect(pullPolicy.severity == .cosmetic)
+        #expect(!result.blockingFindings.contains(pullPolicy))
 
         // A key nobody has ever defined is reported as a typo rather than as unsupported.
         let unknown = try #require(byKey["typo_key"]?.first)
@@ -246,6 +246,48 @@ struct FindingTests {
         #expect(pullPolicy.kind == .unhandledKey)
         #expect(pullPolicy.severity == .cosmetic)
         #expect(result.findings.first { $0.key == "not_a_key" }?.kind == .unknownKey)
+    }
+
+    @Test("A platform is read as written, lowercased, and raises no finding")
+    func platformKey() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              amd:
+                image: nginx
+                platform: linux/amd64
+              arm:
+                image: nginx
+                platform: Linux/ARM/v7
+              plain:
+                image: nginx
+            """
+        )
+        #expect(result.file.services["amd"]?.platform == "linux/amd64")
+        #expect(result.file.services["arm"]?.platform == "linux/arm/v7")
+        #expect(result.file.services["plain"]?.platform == nil)
+        #expect(result.findings.isEmpty)
+    }
+
+    @Test("A platform is interpolated like any other value")
+    func platformInterpolated() throws {
+        let result = try Fixture.parse(
+            "services:\n  web:\n    image: nginx\n    platform: ${PLATFORM:-linux/arm64}\n",
+            environment: ["PLATFORM": "linux/amd64"]
+        )
+        #expect(result.file.services["web"]?.platform == "linux/amd64")
+    }
+
+    @Test("A platform that is not os/arch[/variant] is refused with its line", arguments: [
+        "amd64", "linux/", "linux/amd64/v8/extra", "linux amd64", "/amd64",
+    ])
+    func platformRefused(platform: String) throws {
+        let error = #expect(throws: ParseError.self) {
+            try Fixture.parse("services:\n  web:\n    image: nginx\n    platform: \"\(platform)\"\n")
+        }
+        #expect(error?.reason == .invalidValue)
+        #expect(error?.problem.contains("not a platform") == true)
+        #expect(error?.mark?.line == 4)
     }
 
     @Test("`version` is obsolete, not fatal, and does not block")
