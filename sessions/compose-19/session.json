@@ -1,0 +1,15 @@
+{
+  "box" : "Andrew’s MacBook Air",
+  "branch" : "19-create-and-mount-named-and-anonymous",
+  "issue" : "andrew-waters/compose#19",
+  "pullRequests" : [
+
+  ],
+  "repos" : [
+
+  ],
+  "startedAt" : "2026-10-28T11:55:23Z",
+  "startedBy" : "andrew-waters",
+  "title" : "Create and mount named and anonymous volumes",
+  "url" : "https://github.com/andrew-waters/compose/issues/19"
+}
