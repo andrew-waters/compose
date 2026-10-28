@@ -57,27 +57,36 @@ public struct Service: Sendable, Hashable, Identifiable {
         public enum Source: Sendable, Hashable {
             /// A path on the host, already resolved against the project directory.
             case bind(String)
-            /// A named volume declared at the top level. Deferred: nothing creates these yet.
+            /// A volume declared at the top level, by its key there.
             case named(String)
-            /// No source at all, which compose fills in with a volume it invents.
+            /// No source at all, which compose fills in with a volume it invents. The planner
+            /// names it after the project, the service and the target.
             case anonymous
         }
 
         public var source: Source
         public var target: String
         public var readOnly: Bool
+        /// For a named mount, the volume's name on the host when it does not follow from the
+        /// project name: the volume's own `name:`, or the key of an external one. Filled in by
+        /// the parser once the top-level `volumes:` is read, so that changing either changes
+        /// the service's hash and the container is recreated onto the right volume.
+        public var hostName: String?
 
-        public init(source: Source, target: String, readOnly: Bool = false) {
+        public init(source: Source, target: String, readOnly: Bool = false, hostName: String? = nil) {
             self.source = source
             self.target = target
             self.readOnly = readOnly
+            self.hostName = hostName
         }
 
         public var description: String {
             let prefix: String
             switch source {
             case .bind(let path): prefix = path
-            case .named(let name): prefix = name
+            // Only a mount with a host name of its own renders it, so a volume named after the
+            // project hashes as its key alone.
+            case .named(let name): prefix = hostName.map { "\(name)[\($0)]" } ?? name
             case .anonymous: prefix = ""
             }
             return "\(prefix):\(target)\(readOnly ? ":ro" : "")"

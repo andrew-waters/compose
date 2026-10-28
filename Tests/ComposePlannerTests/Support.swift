@@ -54,7 +54,8 @@ enum Sample {
         running: Bool = true,
         hash: String? = nil,
         publishedHostPorts: [UInt16] = [],
-        networkName: String? = nil
+        networkName: String? = nil,
+        volumes: [String] = []
     ) throws -> ContainerState {
         let resolved = try #require(file.services[service])
         var labels = project.labels(for: resolved)
@@ -64,7 +65,8 @@ enum Sample {
             labels: labels,
             isRunning: running,
             publishedHostPorts: publishedHostPorts,
-            networkName: networkName ?? project.defaultNetworkName
+            networkName: networkName ?? project.defaultNetworkName,
+            volumes: volumes
         )
     }
 }

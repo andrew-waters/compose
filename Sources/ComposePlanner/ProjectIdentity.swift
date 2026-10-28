@@ -18,6 +18,14 @@ public struct ProjectIdentity: Sendable, Hashable {
     public static let serviceLabel = "com.compose.service"
     /// The hash of the resolved service at the moment the container was created.
     public static let hashLabel = "com.compose.hash"
+    /// The key a named volume sits under in the file's `volumes:`.
+    public static let volumeLabel = "com.compose.volume"
+    /// The container path an anonymous volume was made for.
+    public static let volumeTargetLabel = "com.compose.volume.target"
+    /// The runtime's own mark for a volume nobody named, so `container volume prune` and
+    /// anything else reading it treat it as anonymous. Spelt out because this target does not
+    /// link ContainerResource, where it is `VolumeConfiguration.anonymousLabel`.
+    public static let anonymousVolumeLabel = "com.apple.container.resource.anonymous"
 
     public let name: String
 
@@ -82,6 +90,37 @@ public struct ProjectIdentity: Sendable, Hashable {
     /// networks that were already there.
     public func networkLabels() -> [String: String] {
         [Self.projectLabel: name]
+    }
+
+    /// Labels for a named volume this project creates: the file's own, then the project's,
+    /// which are written last so a file cannot hide a volume from `down -v`.
+    public func volumeLabels(for volume: VolumeSpec) -> [String: String] {
+        var labels = volume.labels
+        labels[Self.projectLabel] = name
+        labels[Self.volumeLabel] = volume.key
+        return labels
+    }
+
+    /// The name of the anonymous volume a service mounts at `target`.
+    ///
+    /// Derived rather than random, so that a recreated container finds the volume its
+    /// predecessor wrote to. A path can hold characters a volume name cannot, so the target
+    /// goes in as a digest; its full text is on the volume as a label.
+    public func anonymousVolumeName(service: String, target: String) -> String {
+        let digest = SHA256.hash(data: Data(target.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "\(name)_\(service)_\(hex.prefix(12))"
+    }
+
+    /// Labels for an anonymous volume: the runtime's anonymous mark, and enough of this
+    /// project's to say whose it is and what it was for.
+    public func anonymousVolumeLabels(service: String, target: String) -> [String: String] {
+        [
+            Self.anonymousVolumeLabel: "",
+            Self.projectLabel: name,
+            Self.serviceLabel: service,
+            Self.volumeTargetLabel: target,
+        ]
     }
 
     /// A hash over everything that would change the container, and nothing that would not.

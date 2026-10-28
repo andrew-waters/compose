@@ -151,6 +151,7 @@ struct FileParser {
         }
 
         try validateReferences(in: file, serviceNodes: serviceNodes)
+        resolveVolumeHostNames(in: &file)
         return file
     }
 
@@ -215,6 +216,19 @@ struct FileParser {
         }
     }
 
+    /// Stamp each named mount with its volume's own host name, where it has one. See
+    /// `Service.Mount.hostName`.
+    private func resolveVolumeHostNames(in file: inout ComposeFile) {
+        for name in file.services.keys {
+            guard var service = file.services[name] else { continue }
+            for index in service.mounts.indices {
+                guard case .named(let key) = service.mounts[index].source, let spec = file.volumes[key] else { continue }
+                service.mounts[index].hostName = spec.name ?? (spec.isExternal ? key : nil)
+            }
+            file.services[name] = service
+        }
+    }
+
     // MARK: - Top-level networks and volumes
 
     private mutating func parseTopLevelNetworks(_ node: Node) throws -> [String: NetworkSpec] {
@@ -274,16 +288,76 @@ struct FileParser {
             }
             try validateName(key, kind: "volume", node: keyNode)
             var spec = VolumeSpec(key: key)
+            // Where the volume's host name was written, for the error if it is not one.
+            var nameNode = keyNode
             if valueNode.null == nil {
                 for (fieldNode, fieldValue) in try mapping(valueNode, path: "volumes.\(key)") {
                     let field = fieldNode.scalar?.string ?? ""
                     switch field {
                     case "name":
-                        spec.name = try string(fieldValue, path: "volumes.\(key).name")
+                        let name = try string(fieldValue, path: "volumes.\(key).name")
+                        if let earlier = spec.name, earlier != name {
+                            throw ParseError(
+                                reason: .invalidValue,
+                                problem: "volume `\(key)` is named both `\(earlier)` and `\(name)`",
+                                mark: mark(fieldValue),
+                                path: "volumes.\(key).name"
+                            )
+                        }
+                        spec.name = name
+                        nameNode = fieldValue
                     case "driver":
-                        spec.driver = try string(fieldValue, path: "volumes.\(key).driver")
+                        let driver = try string(fieldValue, path: "volumes.\(key).driver")
+                        spec.driver = driver
+                        if driver != "local" {
+                            note(
+                                key: "volumes.\(key).driver",
+                                node: fieldValue,
+                                support: .unsupported(
+                                    severity: .cosmetic,
+                                    reason: "container has one volume driver, `local`, and uses it"
+                                )
+                            )
+                        }
                     case "external":
-                        spec.isExternal = fieldValue.bool ?? false
+                        if let external = fieldValue.bool {
+                            spec.isExternal = external
+                        } else if fieldValue.mapping != nil {
+                            // The old `external: {name: x}` form, which compose still reads as
+                            // an external volume called `x`. Taking it as false would create an
+                            // empty volume in place of the one meant.
+                            spec.isExternal = true
+                            for (externalKey, externalValue) in try mapping(fieldValue, path: "volumes.\(key).external") {
+                                let externalField = externalKey.scalar?.string ?? ""
+                                guard externalField == "name" else {
+                                    if KeySupportTable.isExtensionKey(externalField) { continue }
+                                    note(
+                                        key: "volumes.\(key).external.\(externalField)",
+                                        node: externalValue,
+                                        support: .unsupported(severity: .cosmetic, reason: "the old `external` form takes only `name`")
+                                    )
+                                    continue
+                                }
+                                let name = try string(externalValue, path: "volumes.\(key).external.name")
+                                if let earlier = spec.name, earlier != name {
+                                    throw ParseError(
+                                        reason: .invalidValue,
+                                        problem: "volume `\(key)` is named both `\(earlier)` and `\(name)`",
+                                        mark: mark(externalValue),
+                                        path: "volumes.\(key).external.name"
+                                    )
+                                }
+                                spec.name = name
+                                nameNode = externalValue
+                            }
+                        } else {
+                            throw ParseError(
+                                reason: .wrongShape,
+                                problem: "`external` is true or false",
+                                mark: mark(fieldValue),
+                                path: "volumes.\(key).external"
+                            )
+                        }
                     case "labels":
                         spec.labels = try parseLabels(fieldValue, service: nil, path: "volumes.\(key).labels")
                     default:
@@ -296,14 +370,12 @@ struct FileParser {
                     }
                 }
             }
-            note(
-                key: "volumes.\(key)",
-                node: node,
-                support: .deferred(
-                    severity: .behavioural,
-                    reason: "named volumes are declared but never created; nothing manages their lifecycle yet"
-                )
-            )
+            // A key becomes `<project>_<key>`, which always starts well. A name the volume
+            // keeps as it is has to be one the runtime takes, or `up` fails part way through
+            // with no line to point at.
+            if let hostName = spec.name ?? (spec.isExternal ? key : nil) {
+                try validateVolumeName(hostName, node: nameNode)
+            }
             volumes[key] = spec
         }
         return volumes

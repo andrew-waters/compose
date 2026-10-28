@@ -93,13 +93,16 @@ struct Up: AsyncParsableCommand {
 
 struct Down: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Stop and remove the project's containers, and the networks it created."
+        abstract: "Stop and remove the project's containers, and the networks it created; with -v, its volumes too."
     )
 
     @OptionGroup var common: CommonOptions
 
     @Flag(name: .long, help: "Leave the networks this project created in place.")
     var keepNetworks = false
+
+    @Flag(name: [.customShort("v"), .long], help: "Remove the volumes this project created, named and anonymous.")
+    var volumes = false
 
     func run() async throws {
         // `down` reads the file for the service names and the order to stop them in, but the
@@ -115,7 +118,7 @@ struct Down: AsyncParsableCommand {
                 file: project.file,
                 project: project.identity,
                 state: state,
-                options: DownOptions(removeNetworks: !keepNetworks)
+                options: DownOptions(removeNetworks: !keepNetworks, removeVolumes: volumes)
             )
         } catch let error as PlanError {
             throw ComposeError(error.description)
