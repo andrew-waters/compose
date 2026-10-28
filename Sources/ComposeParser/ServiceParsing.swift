@@ -491,29 +491,6 @@ extension FileParser {
                 )
             }
             guard let mount else { continue }
-            switch mount.source {
-            case .bind:
-                break
-            case .named(let name):
-                noteForm(
-                    key: "volumes",
-                    service: service,
-                    node: element,
-                    severity: .behavioural,
-                    reason: "`\(name)` is a named volume, and nothing here creates one yet; the mount is dropped"
-                )
-                continue
-            case .anonymous:
-                noteForm(
-                    key: "volumes",
-                    service: service,
-                    node: element,
-                    severity: .behavioural,
-                    reason: "an anonymous volume at `\(mount.target)` needs volume support, which is not here yet; "
-                        + "the mount is dropped"
-                )
-                continue
-            }
             mounts.append(mount)
         }
         return mounts
@@ -571,13 +548,26 @@ extension FileParser {
             case "source": source = try string(valueNode, path: "\(path).source")
             case "target": target = try string(valueNode, path: "\(path).target")
             case "read_only": readOnly = valueNode.bool ?? false
+            case "volume":
+                for (optionNode, optionValue) in try mapping(valueNode, path: "\(path).volume") {
+                    let option = optionNode.scalar?.string ?? ""
+                    // Mounting the whole volume where part of it was asked for would show the
+                    // container files it was never meant to see, so `subpath` is refused.
+                    let support: KeySupport = option == "subpath"
+                        ? .unsupported(severity: .behavioural, reason: "a volume is mounted whole; part of one cannot be")
+                        : .unsupported(severity: .cosmetic, reason: "a volume mount here takes no options")
+                    note(key: "volumes.volume.\(option)", service: service, node: optionValue, support: support)
+                }
             default:
                 if KeySupportTable.isExtensionKey(key) { continue }
                 note(
                     key: "volumes.\(key)",
                     service: service,
                     node: valueNode,
-                    support: .unsupported(severity: .cosmetic, reason: "a mount here is a host path, a container path and a read-only flag")
+                    support: .unsupported(
+                        severity: .cosmetic,
+                        reason: "a mount here is a source, a target and a read-only flag, and nothing else"
+                    )
                 )
             }
         }

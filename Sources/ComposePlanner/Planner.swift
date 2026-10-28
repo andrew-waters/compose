@@ -13,6 +13,12 @@ public enum PlanError: Error, Sendable, Equatable, CustomStringConvertible {
     case portConflict(port: UInt16, service: String, heldBy: String)
     case duplicateContainerName(name: String, services: [String])
     case missingExternalNetwork(name: String, service: String)
+    case missingExternalVolume(name: String, service: String)
+    /// Two mounts in the file want the same volume. A volume is an ext4 disk, and two
+    /// machines writing one corrupt it.
+    case sharedVolume(name: String, services: [String])
+    /// A service mounts a volume a running container outside it already has.
+    case volumeInUse(name: String, service: String, heldBy: String)
 
     public var description: String {
         switch self {
@@ -27,6 +33,16 @@ public enum PlanError: Error, Sendable, Equatable, CustomStringConvertible {
             return "services \(services.map { "`\($0)`" }.joined(separator: " and ")) both want the container name `\(name)`"
         case .missingExternalNetwork(let name, let service):
             return "service `\(service)` attaches to external network `\(name)`, which does not exist"
+        case .missingExternalVolume(let name, let service):
+            return "service `\(service)` mounts external volume `\(name)`, which does not exist"
+        case .sharedVolume(let name, let services):
+            let users = services.count == 1
+                ? "service `\(services[0])` mounts it more than once"
+                : "services \(services.map { "`\($0)`" }.joined(separator: " and ")) both mount it"
+            return "volume `\(name)` can only be mounted once, and \(users); "
+                + "a volume here is a disk that one container uses at a time"
+        case .volumeInUse(let name, let service, let heldBy):
+            return "service `\(service)` mounts volume `\(name)`, which \(heldBy) is already using"
         }
     }
 }
@@ -107,9 +123,13 @@ public struct UpOptions: Sendable {
 public struct DownOptions: Sendable {
     /// Remove networks this project created, once nothing outside the project is on them.
     public var removeNetworks: Bool
+    /// Remove volumes this project created, named and anonymous. Off unless asked for, since a
+    /// volume is where the data is.
+    public var removeVolumes: Bool
 
-    public init(removeNetworks: Bool = true) {
+    public init(removeNetworks: Bool = true, removeVolumes: Bool = false) {
         self.removeNetworks = removeNetworks
+        self.removeVolumes = removeVolumes
     }
 }
 
@@ -129,6 +149,7 @@ public enum Planner {
         let order = graph.startOrder
         let containerNames = try containerNames(for: file, project: project, order: order)
         let networks = try networkAssignments(for: file, project: project, order: order, state: state)
+        try checkExternalVolumes(in: file, project: project, order: order, state: state)
 
         var existingByService: [String: ContainerState] = [:]
         var orphans: [ContainerState] = []
@@ -183,6 +204,14 @@ public enum Planner {
             state: state,
             releasedContainers: releasedContainers
         )
+        try checkVolumeUse(
+            file: file,
+            project: project,
+            order: order,
+            containerNames: containerNames,
+            state: state,
+            releasedContainers: releasedContainers
+        )
 
         var operations: [Operation] = []
 
@@ -205,6 +234,40 @@ public enum Planner {
             operations.append(
                 .createNetwork(NetworkOperation(name: assignment.name, labels: project.networkLabels()))
             )
+        }
+
+        // Volumes come before any container that mounts them. Every declared volume is made,
+        // whether or not a service in this run is being created, which is what compose does; an
+        // anonymous one only for a container about to be created, since nothing else will
+        // mount it. Neither is made twice, so a recreated container finds its data.
+        let existingVolumes = Set(state.volumes.map(\.name))
+        var createdVolumes: Set<String> = []
+        let declared = file.volumes.values
+            .filter { !$0.isExternal }
+            .map { (name: $0.resolvedName(projectName: project.name), spec: $0) }
+            .sorted { $0.name < $1.name }
+        for volume in declared where !existingVolumes.contains(volume.name) {
+            guard createdVolumes.insert(volume.name).inserted else { continue }
+            operations.append(
+                .createVolume(VolumeOperation(name: volume.name, labels: project.volumeLabels(for: volume.spec)))
+            )
+        }
+        for name in order {
+            guard let service = file.services[name], actions[name] == .create || actions[name] == .recreate else {
+                continue
+            }
+            for mount in service.mounts where mount.source == .anonymous {
+                let volume = project.anonymousVolumeName(service: name, target: mount.target)
+                guard !existingVolumes.contains(volume), createdVolumes.insert(volume).inserted else { continue }
+                operations.append(
+                    .createVolume(
+                        VolumeOperation(
+                            name: volume,
+                            labels: project.anonymousVolumeLabels(service: name, target: mount.target)
+                        )
+                    )
+                )
+            }
         }
 
         for name in order {
@@ -253,6 +316,7 @@ public enum Planner {
                     .createContainer(
                         createOperation(
                             service: service,
+                            file: file,
                             containerName: containerName,
                             imageReference: image,
                             networkName: assignment.name,
@@ -271,9 +335,10 @@ public enum Planner {
     /// Stop and remove everything carrying the project label, then the networks the project
     /// created, in the reverse of the order `up` started things in.
     ///
-    /// Volumes are left alone. Nothing here creates a named volume yet, so there is nothing to
-    /// remove; when there is, removing one will need an explicit flag, which is the one piece
-    /// of compose behaviour worth copying exactly.
+    /// Volumes are left alone unless `removeVolumes` asks for them, which is the one piece of
+    /// compose behaviour worth copying exactly: a volume is where the data is. When asked, only
+    /// volumes carrying the project label go, so an external volume, or a `name:` volume that
+    /// was there before the project, survives.
     public static func down(
         file: ComposeFile,
         project: ProjectIdentity,
@@ -325,6 +390,20 @@ public enum Planner {
                 }
                 guard !stillUsed else { continue }
                 operations.append(.removeNetwork(NetworkOperation(name: network.name, labels: network.labels)))
+            }
+        }
+
+        if options.removeVolumes {
+            // The runtime refuses to delete a volume any container mounts, running or not, and
+            // by then the containers and networks are gone. A volume still mounted outside what
+            // this plan removes is left, as a network still in use is.
+            let removed = Set(ordered.map(\.name))
+            for volume in state.volumes.sorted(by: { $0.name < $1.name }) where volume.projectName == project.name {
+                let stillUsed = state.containers.contains {
+                    $0.volumes.contains(volume.name) && !removed.contains($0.name)
+                }
+                guard !stillUsed else { continue }
+                operations.append(.removeVolume(VolumeOperation(name: volume.name, labels: volume.labels)))
             }
         }
 
@@ -478,6 +557,71 @@ public enum Planner {
         return names
     }
 
+    /// An external volume is somebody else's to create, so one a service mounts has to be there
+    /// already. Checked before any operation exists, as an external network is.
+    private static func checkExternalVolumes(
+        in file: ComposeFile,
+        project: ProjectIdentity,
+        order: [String],
+        state: CurrentState
+    ) throws {
+        let existing = Set(state.volumes.map(\.name))
+        for name in order {
+            guard let service = file.services[name] else { continue }
+            for mount in service.mounts {
+                guard case .named(let key) = mount.source, let spec = file.volumes[key], spec.isExternal else {
+                    continue
+                }
+                let volume = spec.resolvedName(projectName: project.name)
+                if !existing.contains(volume) {
+                    throw PlanError.missingExternalVolume(name: volume, service: name)
+                }
+            }
+        }
+    }
+
+    /// Every volume mounted once, and by nothing else that is running.
+    ///
+    /// A volume is an ext4 disk attached to one container's machine, and the runtime does not
+    /// stop a second one attaching it, so this has to. Read-only mounts are no exception: a
+    /// read-only ext4 mount can still replay the journal, and nothing promises the attachment
+    /// itself is read-only. Stopped containers do not count, as for ports; the clash surfaces
+    /// when someone starts one again.
+    private static func checkVolumeUse(
+        file: ComposeFile,
+        project: ProjectIdentity,
+        order: [String],
+        containerNames: [String: String],
+        state: CurrentState,
+        releasedContainers: Set<String>
+    ) throws {
+        var mountedBy: [String: String] = [:]
+        for name in order {
+            guard let service = file.services[name] else { continue }
+            for mount in service.mounts {
+                let volume: String
+                switch mount.source {
+                case .bind:
+                    continue
+                case .named(let key):
+                    volume = file.volumes[key]?.resolvedName(projectName: project.name) ?? key
+                case .anonymous:
+                    volume = project.anonymousVolumeName(service: name, target: mount.target)
+                }
+                if let other = mountedBy[volume] {
+                    throw PlanError.sharedVolume(name: volume, services: Array(Set([other, name])).sorted())
+                }
+                mountedBy[volume] = name
+            }
+        }
+        for container in state.containers where container.isRunning && !releasedContainers.contains(container.name) {
+            for volume in container.volumes.sorted() {
+                guard let wanting = mountedBy[volume], containerNames[wanting] != container.name else { continue }
+                throw PlanError.volumeInUse(name: volume, service: wanting, heldBy: "container `\(container.name)`")
+            }
+        }
+    }
+
     /// Every published port, checked against every other service and against everything already
     /// running, before an operation exists to conflict with.
     ///
@@ -587,21 +731,25 @@ public enum Planner {
 
     private static func createOperation(
         service: Service,
+        file: ComposeFile,
         containerName: String,
         imageReference: String,
         networkName: String,
         project: ProjectIdentity
     ) -> CreateOperation {
-        var mounts: [CreateOperation.Mount] = []
-        for mount in service.mounts {
-            guard case .bind(let hostPath) = mount.source else { continue }
-            mounts.append(
-                CreateOperation.Mount(
-                    hostPath: hostPath,
-                    containerPath: mount.target,
-                    readOnly: mount.readOnly
-                )
-            )
+        let mounts = service.mounts.map { mount -> CreateOperation.Mount in
+            let source: CreateOperation.Mount.Source
+            switch mount.source {
+            case .bind(let hostPath):
+                source = .bind(hostPath)
+            case .named(let key):
+                // The parser refuses a mount of a volume the file does not declare, so the key
+                // is always there; falling back to it keeps this total without a crash.
+                source = .namedVolume(file.volumes[key]?.resolvedName(projectName: project.name) ?? key)
+            case .anonymous:
+                source = .anonymousVolume(project.anonymousVolumeName(service: service.name, target: mount.target))
+            }
+            return CreateOperation.Mount(source: source, containerPath: mount.target, readOnly: mount.readOnly)
         }
         let ports = service.ports.compactMap { port -> CreateOperation.Port? in
             guard let hostPort = port.hostPort else { return nil }

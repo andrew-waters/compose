@@ -56,6 +56,20 @@ extension FileParser {
         }
     }
 
+    /// The runtime's own rule for a volume name, `^[A-Za-z0-9][A-Za-z0-9_.-]*$`, which is
+    /// stricter than `validateName` about the first character.
+    func validateVolumeName(_ name: String, node: Node) throws {
+        try validateName(name, kind: "volume", node: node)
+        let alphanumeric = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        guard let first = name.unicodeScalars.first, alphanumeric.contains(first) else {
+            throw ParseError(
+                reason: .wrongShape,
+                problem: "`\(name)` is not a usable volume name; it has to start with a letter or a digit",
+                mark: mark(node)
+            )
+        }
+    }
+
     /// `os/arch` or `os/arch/variant`, lowercased, which is what the runtime matches an
     /// image's platforms against. Anything else is refused here rather than at create time,
     /// where the error would name the image instead of the line.

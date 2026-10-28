@@ -161,13 +161,164 @@ struct FindingTests {
         #expect(finding.severity == .behavioural)
     }
 
-    @Test("A named volume is dropped loudly rather than mounted quietly")
+    @Test("A declared volume is mounted, and neither the mount nor the declaration is a finding")
     func namedVolume() throws {
         let result = try Fixture.parse(try Fixture.text("unsupported"))
-        #expect(result.file.services["app"]?.mounts.isEmpty == true)
-        let finding = try #require(result.findings.first { $0.key == "volumes" })
-        #expect(finding.severity == .behavioural)
-        #expect(finding.message.contains("appdata"))
+        #expect(result.file.services["app"]?.mounts == [Service.Mount(source: .named("appdata"), target: "/data")])
+        #expect(result.file.volumes["appdata"] == VolumeSpec(key: "appdata"))
+        #expect(!result.findings.contains { $0.key == "volumes" || $0.key.hasPrefix("volumes.") })
+    }
+
+    @Test("Named and anonymous volumes are kept in both forms, read-only included")
+    func volumeMounts() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              db:
+                image: postgres:16
+                volumes:
+                  - pgdata:/var/lib/postgresql/data
+                  - backup:/backup:ro
+                  - /scratch
+                  - type: volume
+                    source: pgdata
+                    target: /long
+                    read_only: true
+                  - type: volume
+                    target: /cache
+            volumes:
+              pgdata:
+              backup:
+            """
+        )
+        #expect(result.findings.isEmpty)
+        #expect(result.file.services["db"]?.mounts == [
+            Service.Mount(source: .named("pgdata"), target: "/var/lib/postgresql/data"),
+            Service.Mount(source: .named("backup"), target: "/backup", readOnly: true),
+            Service.Mount(source: .anonymous, target: "/scratch"),
+            Service.Mount(source: .named("pgdata"), target: "/long", readOnly: true),
+            Service.Mount(source: .anonymous, target: "/cache"),
+        ])
+    }
+
+    @Test("A volume the file does not declare is still refused, in either form")
+    func undeclaredVolume() throws {
+        for mount in ["- pgdata:/data", "- {type: volume, source: pgdata, target: /data}"] {
+            let error = #expect(throws: ParseError.self) {
+                try Fixture.parse("services:\n  db:\n    image: postgres:16\n    volumes:\n      \(mount)\n")
+            }
+            #expect(error?.reason == .undefinedReference)
+            #expect(error?.problem.contains("`pgdata`") == true)
+        }
+    }
+
+    @Test("A named mount carries its volume's host name only when the project does not decide it")
+    func mountHostNames() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              app:
+                image: app:1
+                volumes:
+                  - plain:/plain
+                  - named:/named
+                  - outside:/outside
+                  - legacy:/legacy
+            volumes:
+              plain:
+              named:
+                name: team-data
+              outside:
+                external: true
+              legacy:
+                external:
+                  name: old-data
+                  driver: local
+                  x-note: kept
+            """
+        )
+        // Anything else in the old form is noted, never dropped quietly; extensions are not.
+        let finding = try #require(result.findings.first)
+        #expect(result.findings.count == 1)
+        #expect(finding.key == "volumes.legacy.external.driver")
+        #expect(finding.severity == .cosmetic)
+        #expect(result.file.volumes["legacy"] == VolumeSpec(key: "legacy", name: "old-data", isExternal: true))
+        #expect(result.file.services["app"]?.mounts.map(\.hostName) == [nil, "team-data", "outside", "old-data"])
+    }
+
+    @Test("A volume name the runtime would refuse is refused here, with its line")
+    func badVolumeNames() throws {
+        for (yaml, line) in [
+            ("volumes:\n  data:\n    name: _data\n", 3),
+            ("volumes:\n  data:\n    external:\n      name: -data\n", 4),
+            ("volumes:\n  _data:\n    external: true\n", 2),
+            ("volumes:\n  data:\n    name: has space\n", 3),
+        ] {
+            let error = #expect(throws: ParseError.self) {
+                try Fixture.parse("services:\n  app:\n    image: app:1\n" + yaml)
+            }
+            #expect(error?.reason == .wrongShape)
+            #expect(error?.mark?.line == line + 3)
+        }
+        // A key that only becomes part of `<project>_<key>` may start as the runtime would not.
+        #expect(throws: Never.self) {
+            try Fixture.parse("services:\n  app:\n    image: app:1\nvolumes:\n  _data:\n")
+        }
+    }
+
+    @Test("A volume's options are noted, and a subpath, which would mount the whole volume, is refused")
+    func volumeOptions() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              app:
+                image: app:1
+                volumes:
+                  - type: volume
+                    source: data
+                    target: /data
+                    volume:
+                      nocopy: true
+                      subpath: cache
+            volumes:
+              data:
+            """
+        )
+        let byKey = Dictionary(grouping: result.findings, by: \.key)
+        #expect(byKey["volumes.volume.nocopy"]?.first?.severity == .cosmetic)
+        let subpath = try #require(byKey["volumes.volume.subpath"]?.first)
+        #expect(subpath.severity == .behavioural)
+        #expect(result.blockingFindings.contains(subpath))
+    }
+
+    @Test("Top-level volumes keep their fields, and a driver other than local is noted")
+    func topLevelVolumes() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              db:
+                image: postgres:16
+            volumes:
+              plain:
+              local:
+                driver: local
+              shared:
+                name: team-data
+                external: true
+              fancy:
+                driver: nfs
+                labels:
+                  tier: gold
+            """
+        )
+        #expect(result.file.volumes["plain"] == VolumeSpec(key: "plain"))
+        #expect(result.file.volumes["local"] == VolumeSpec(key: "local", driver: "local"))
+        #expect(result.file.volumes["shared"] == VolumeSpec(key: "shared", name: "team-data", isExternal: true))
+        #expect(result.file.volumes["fancy"] == VolumeSpec(key: "fancy", driver: "nfs", labels: ["tier": "gold"]))
+        #expect(result.findings.count == 1)
+        let finding = try #require(result.findings.first)
+        #expect(finding.key == "volumes.fancy.driver")
+        #expect(finding.severity == .cosmetic)
     }
 
     @Test("A finding says whether the runtime is the obstacle, or this project is")

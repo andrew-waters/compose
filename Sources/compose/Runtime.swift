@@ -15,7 +15,7 @@ import TerminalProgress
 enum Runtime {
     // MARK: - Reading the world
 
-    /// Every container, network and image the runtime knows about.
+    /// Every container, network, image and volume the runtime knows about.
     ///
     /// Deliberately everything, not just this project's: the planner checks published ports
     /// against the whole machine, and a host port taken by something unrelated is exactly the
@@ -25,12 +25,14 @@ enum Runtime {
             async let containers = ContainerClient().list()
             async let networks = NetworkClient().list()
             async let images = ClientImage.list()
+            async let volumes = ClientVolume.list()
             return CurrentState(
                 containers: try await containers.map(state(of:)),
                 networks: try await networks.map {
                     NetworkState(name: $0.id, labels: $0.labels.dictionary)
                 },
-                images: try await images.map(\.reference)
+                images: try await images.map(\.reference),
+                volumes: try await volumes.map { VolumeState(name: $0.name, labels: $0.labels) }
             )
         } catch {
             throw ComposeError(
@@ -51,7 +53,8 @@ enum Runtime {
             publishedHostPorts: snapshot.configuration.publishedPorts.flatMap { port in
                 (0..<port.count).map { port.hostPort + $0 }
             },
-            networkName: snapshot.configuration.networks.first?.network
+            networkName: snapshot.configuration.networks.first?.network,
+            volumes: snapshot.configuration.mounts.compactMap(\.volumeName)
         )
     }
 
@@ -125,6 +128,11 @@ enum Runtime {
             try await createNetwork(operation)
         case .removeNetwork(let operation):
             try await NetworkClient().delete(id: operation.name)
+        case .createVolume(let operation):
+            // `local` is the only driver the runtime has; a file naming another was told so.
+            _ = try await ClientVolume.create(name: operation.name, labels: operation.labels)
+        case .removeVolume(let operation):
+            try await ClientVolume.delete(name: operation.name)
         case .pullImage(let operation):
             try await pull(operation)
         case .buildImage(let operation):
@@ -273,19 +281,22 @@ enum Runtime {
     @discardableResult
     static func ensureBindSources(of operation: CreateOperation) throws -> [String] {
         var created: [String] = []
-        for mount in operation.mounts where !FileManager.default.fileExists(atPath: mount.hostPath) {
+        for mount in operation.mounts {
+            guard case .bind(let hostPath) = mount.source, !FileManager.default.fileExists(atPath: hostPath) else {
+                continue
+            }
             do {
                 try FileManager.default.createDirectory(
-                    atPath: mount.hostPath,
+                    atPath: hostPath,
                     withIntermediateDirectories: true
                 )
             } catch {
                 throw ComposeError(
-                    "`\(mount.hostPath)` is mounted at `\(mount.containerPath)` and does not "
+                    "`\(hostPath)` is mounted at `\(mount.containerPath)` and does not "
                         + "exist: \(error.localizedDescription)"
                 )
             }
-            created.append(mount.hostPath)
+            created.append(hostPath)
         }
         return created
     }
@@ -333,12 +344,26 @@ enum Runtime {
         let kernel = try await ClientKernel.getDefaultKernel(for: .current)
         let imageConfig = try await image.config(for: platform).config
 
-        let mounts: [Filesystem] = operation.mounts.map { mount in
-            .virtiofs(
-                source: mount.hostPath,
-                destination: mount.containerPath,
-                options: mount.readOnly ? ["ro"] : []
-            )
+        var mounts: [Filesystem] = []
+        for mount in operation.mounts {
+            let options: MountOptions = mount.readOnly ? ["ro"] : []
+            switch mount.source {
+            case .bind(let hostPath):
+                mounts.append(.virtiofs(source: hostPath, destination: mount.containerPath, options: options))
+            case .namedVolume(let name), .anonymousVolume(let name):
+                // The plan created any volume that was missing, so this only reads where the
+                // runtime keeps it, as `container run` does before mounting one.
+                let volume = try await ClientVolume.inspect(name)
+                mounts.append(
+                    .volume(
+                        name: name,
+                        format: volume.format,
+                        source: volume.source,
+                        destination: mount.containerPath,
+                        options: options
+                    )
+                )
+            }
         }
         let ports: [PublishPort] = try operation.ports.map { port in
             try PublishPort(

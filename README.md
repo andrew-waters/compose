@@ -54,14 +54,34 @@ single container.
 The dividing line is what container's own create surface can already express.
 
 **Supported:** `image`, `build`, `container_name`, `command`, `environment`, `env_file`,
-`working_dir`, `ports`, bind `volumes`, `labels`, `networks`, `dns`, `dns_search`,
-`dns_opt`, `deploy.resources`, `depends_on` in its list form, `platform`, and the
-`post_start` and `pre_stop` lifecycle hooks.
+`working_dir`, `ports`, `volumes` (bind, named and anonymous) and the top-level `volumes`,
+`labels`, `networks`, `dns`, `dns_search`, `dns_opt`, `deploy.resources`, `depends_on` in its
+list form, `platform`, and the `post_start` and `pre_stop` lifecycle hooks.
 
 `platform` takes `os/arch` or `os/arch/variant`, such as `linux/amd64`. The image is pulled,
 built and run as that platform; on Apple silicon a `linux/amd64` service runs under Rosetta,
 which has to be installed (`softwareupdate --install-rosetta`). A service without it runs as
 the host's platform, as before.
+
+A named volume is created by `up` when it is missing, as `<project>_<key>` unless the file gives
+it a `name:`, and labelled with the project. An `external: true` volume is never created, and
+`up` stops before doing anything if one a service mounts does not exist. An anonymous volume
+(`- /var/lib/data`) is named after the project, the service and its path, so a recreated
+container finds the same data; unlike Docker, an `up` after a plain `down` finds it too.
+`down` leaves every volume in place; `down -v` removes the ones this project created, except one
+a container outside the project still mounts. Volumes
+use container's `local` driver; a file naming another is told so. A service that mounts a volume
+is recreated once on the first `up` after upgrading, which is what attaches it.
+
+A volume here is an ext4 filesystem, not a directory, so it has a `lost+found` at its root.
+An image that refuses a data directory that is not empty needs pointing one level down: for
+`postgres`, set `PGDATA: /var/lib/postgresql/data/pgdata` and mount the volume at
+`/var/lib/postgresql/data`, as with `container run`.
+
+That disk is attached to one container at a time, so a volume can be mounted only once:
+two services sharing one, or a service mounting one a running container elsewhere already
+has, stops `up` before it does anything. That includes read-only mounts. Share files between
+services with a bind mount instead.
 
 Hooks run inside the service's container with their `command`, `environment`, `working_dir`
 and `user`; anything a hook leaves out is what the container's own process runs with. `up`
@@ -80,7 +100,7 @@ a container has no privileged mode. As everywhere in a compose file, `$VAR` in a
 filled in from your shell when the file is read; write `$$VAR` for the container's own
 variable. Orchard does not run hooks.
 
-**Not yet:** `entrypoint`, named `volumes`, attaching to multiple networks, `profiles`,
+**Not yet:** `entrypoint`, attaching to multiple networks, `profiles`,
 `include`, `healthcheck`, and `depends_on` with conditions. `pull_policy` is read but not
 honoured: an image is pulled when it is missing.
 
@@ -159,7 +179,7 @@ container compose down               # stop and remove it all again
 Both verbs take `-f` to point at a file elsewhere, `-p` to name the project (it otherwise
 comes from the file's `name`, then from the directory), and `--dry-run`. `up` also takes
 `--force-recreate`, `--pull missing|always|never` and `--keep-orphans`; `down` takes
-`--keep-networks`.
+`--keep-networks`, and `-v` / `--volumes` to remove the project's volumes too.
 
 Running `up` twice is the interesting case. The second run compares each service against the
 hash stamped on the container it produced, and creates, starts, leaves alone, recreates or
