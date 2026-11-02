@@ -1,0 +1,15 @@
+{
+  "box" : "Andrew’s MacBook Air",
+  "branch" : "21-read-a-network-s-legacy-external-name-x",
+  "issue" : "andrew-waters/compose#21",
+  "pullRequests" : [
+
+  ],
+  "repos" : [
+
+  ],
+  "startedAt" : "2026-11-02T08:08:45Z",
+  "startedBy" : "andrew-waters",
+  "title" : "Read a network's legacy external: {name: x} form as external",
+  "url" : "https://github.com/andrew-waters/compose/issues/21"
+}
