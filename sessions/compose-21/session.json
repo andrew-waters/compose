@@ -1,6 +1,7 @@
 {
   "box" : "Andrew’s MacBook Air",
   "branch" : "21-read-a-network-s-legacy-external-name-x",
+  "finishedAt" : "2026-11-02T12:08:02Z",
   "issue" : "andrew-waters/compose#21",
   "pullRequests" : [
     "https://github.com/andrew-waters/compose/pull/22"
