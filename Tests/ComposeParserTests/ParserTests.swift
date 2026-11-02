@@ -266,6 +266,132 @@ struct FindingTests {
         }
     }
 
+    @Test("A network's `external` is read in both forms, and the old one names the network")
+    func networkExternalForms() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              app:
+                image: app:1
+                networks: [legacy]
+              web:
+                image: web:1
+                networks: [plain]
+              api:
+                image: api:1
+                networks: [outside]
+              admin:
+                image: admin:1
+                networks: [named]
+            networks:
+              plain:
+                external: false
+              outside:
+                external: true
+              named:
+                name: team-net
+              legacy:
+                external:
+                  name: old-net
+                  driver: bridge
+                  x-note: kept
+            """
+        )
+        // Anything else in the old form is noted, never dropped quietly; extensions are not.
+        let finding = try #require(result.findings.first)
+        #expect(result.findings.count == 1)
+        #expect(finding.key == "networks.legacy.external.driver")
+        #expect(finding.severity == .cosmetic)
+        #expect(result.file.networks["plain"] == NetworkSpec(key: "plain"))
+        #expect(result.file.networks["outside"] == NetworkSpec(key: "outside", isExternal: true))
+        #expect(result.file.networks["legacy"] == NetworkSpec(key: "legacy", name: "old-net", isExternal: true))
+
+        // Each service carries the network's host name only when the project does not decide it.
+        #expect(result.file.services["app"]?.networkHostNames == ["legacy": "old-net"])
+        #expect(result.file.services["web"]?.networkHostNames == [:])
+        #expect(result.file.services["api"]?.networkHostNames == ["outside": "outside"])
+        #expect(result.file.services["admin"]?.networkHostNames == ["named": "team-net"])
+    }
+
+    @Test("Only the network a service joins carries its host name, the implicit `default` included")
+    func joinedNetworkHostNames() throws {
+        let result = try Fixture.parse(
+            """
+            services:
+              app:
+                image: app:1
+              web:
+                image: web:1
+                networks: [plain, named]
+            networks:
+              default:
+                external:
+                  name: team-net
+              plain:
+              named:
+                name: other-net
+            """
+        )
+        #expect(result.file.networks["default"] == NetworkSpec(key: "default", name: "team-net", isExternal: true))
+        // `app` lists no network, so it is on `default`; `web` joins only `plain`, and was told so.
+        #expect(result.file.services["app"]?.networkHostNames == ["default": "team-net"])
+        #expect(result.file.services["web"]?.networkHostNames == [:])
+    }
+
+    @Test("A network's `external` that names it twice, or is neither form, is refused with its line")
+    func badNetworkExternal() throws {
+        for (yaml, line, reason) in [
+            ("networks:\n  shared:\n    name: one\n    external:\n      name: two\n", 5, ParseError.Reason.invalidValue),
+            ("networks:\n  shared:\n    external:\n      name: two\n    name: one\n", 5, .invalidValue),
+            ("networks:\n  shared:\n    external: nope\n", 3, .wrongShape),
+            ("networks:\n  shared:\n    external: [team-net]\n", 3, .wrongShape),
+        ] {
+            let error = #expect(throws: ParseError.self) {
+                try Fixture.parse("services:\n  app:\n    image: app:1\n" + yaml)
+            }
+            #expect(error?.reason == reason)
+            #expect(error?.mark?.line == line + 3)
+        }
+        // The same name twice says one thing, so it is taken.
+        let same = try Fixture.parse(
+            "services:\n  app:\n    image: app:1\nnetworks:\n  shared:\n    name: team-net\n    external:\n      name: team-net\n"
+        )
+        #expect(same.file.networks["shared"] == NetworkSpec(key: "shared", name: "team-net", isExternal: true))
+    }
+
+    @Test("A network name the runtime would refuse is refused here, with its line")
+    func badNetworkNames() throws {
+        for (yaml, line) in [
+            ("networks:\n  shared:\n    name: Team-Net\n", 3),
+            ("networks:\n  shared:\n    external:\n      name: team-net-\n", 4),
+            ("networks:\n  _shared:\n    external: true\n", 2),
+            ("networks:\n  shared:\n    name: \(String(repeating: "a", count: 64))\n", 3),
+            // A key that becomes the end of `<project>_<key>` has to keep the rule too.
+            ("networks:\n  Backend: {}\n", 2),
+            ("networks:\n  backend-:\n", 2),
+        ] {
+            let error = #expect(throws: ParseError.self) {
+                try Fixture.parse("services:\n  app:\n    image: app:1\n" + yaml)
+            }
+            #expect(error?.reason == .wrongShape)
+            #expect(error?.mark?.line == line + 3)
+        }
+        // The longest name the runtime takes, and a key that only starts in a way the runtime
+        // would refuse at the front of a name, are both left alone.
+        #expect(throws: Never.self) {
+            try Fixture.parse(
+                "services:\n  app:\n    image: app:1\nnetworks:\n  shared:\n    name: \(String(repeating: "a", count: 63))\n"
+            )
+        }
+        #expect(throws: Never.self) {
+            try Fixture.parse("services:\n  app:\n    image: app:1\nnetworks:\n  _shared:\n")
+        }
+        // A key with a name of its own never reaches the host, so only the name is checked.
+        #expect(throws: Never.self) {
+            try Fixture.parse("services:\n  app:\n    image: app:1\nnetworks:\n  Backend:\n    name: backend\n")
+        }
+    }
+
     @Test("A volume's options are noted, and a subpath, which would mount the whole volume, is refused")
     func volumeOptions() throws {
         let result = try Fixture.parse(
