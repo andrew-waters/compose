@@ -63,6 +63,16 @@ built and run as that platform; on Apple silicon a `linux/amd64` service runs un
 which has to be installed (`softwareupdate --install-rosetta`). A service without it runs as
 the host's platform, as before.
 
+A network is created by `up` as `<project>_<key>` unless the file gives it a `name:`. An
+`external` network, in either the `external: true` form or the older `external: {name: x}`
+one, is joined and never created, and `up` stops before doing anything if it does not exist.
+A service that lists no network is on `default`, which the file can declare to rename it or
+make it external. Network names have to be ones the runtime takes: lowercase letters, digits,
+dots, dashes and underscores, at most 63 characters, starting and ending with a letter or a
+digit. That goes for a `name:`, an external network's key, and a key that ends
+`<project>_<key>`. Renaming the network a service joins, or making it external, recreates the
+service.
+
 A named volume is created by `up` when it is missing, as `<project>_<key>` unless the file gives
 it a `name:`, and labelled with the project. An `external: true` volume is never created, and
 `up` stops before doing anything if one a service mounts does not exist. An anonymous volume

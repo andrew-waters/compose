@@ -149,6 +149,14 @@ public struct Service: Sendable, Hashable, Identifiable {
     public var labels: [String: String]
     /// Networks by the key they carry in the top-level `networks:` block, in file order.
     public var networks: [String]
+    /// For the network the service joins, when its name on the host does not follow from the
+    /// project name, that name: the network's own `name:`, or the key of an external one. Keyed
+    /// by network key. The network joined is the first in `networks`, or the implicit `default`
+    /// when the service lists none, which the file may still declare to rename or make external.
+    /// Filled in by the parser once the top-level `networks:` is read, as `Mount.hostName` is for
+    /// volumes, so that renaming that network or making it external recreates the container
+    /// onto it, and renaming one the service lists but does not join recreates nothing.
+    public var networkHostNames: [String: String]
     /// Nameservers, in the order the resolver should try them. Empty leaves the choice to the
     /// runtime, which fills in the network's own resolver.
     public var dns: [String]
@@ -178,6 +186,7 @@ public struct Service: Sendable, Hashable, Identifiable {
         mounts: [Mount] = [],
         labels: [String: String] = [:],
         networks: [String] = [],
+        networkHostNames: [String: String] = [:],
         dns: [String] = [],
         dnsSearch: [String] = [],
         dnsOptions: [String] = [],
@@ -199,6 +208,7 @@ public struct Service: Sendable, Hashable, Identifiable {
         self.mounts = mounts
         self.labels = labels
         self.networks = networks
+        self.networkHostNames = networkHostNames
         self.dns = dns
         self.dnsSearch = dnsSearch
         self.dnsOptions = dnsOptions
@@ -240,7 +250,12 @@ extension Service {
         for port in ports.map(\.description).sorted() { lines.append("port=\(port)") }
         for mount in mounts.map(\.description).sorted() { lines.append("mount=\(mount)") }
         for key in labels.keys.sorted() { lines.append("label.\(key)=\(labels[key] ?? "")") }
-        for network in networks.sorted() { lines.append("network=\(network)") }
+        // Only a network with a host name of its own renders it, so one named after the
+        // project hashes as its key alone and keeps the hash it had. The implicit `default`
+        // is in `networkHostNames` without being in `networks`, so the two are merged.
+        for network in Set(networks).union(networkHostNames.keys).sorted() {
+            lines.append("network=\(network)" + (networkHostNames[network].map { "[\($0)]" } ?? ""))
+        }
         // Resolver settings are ordered as written: a nameserver list is a preference order,
         // and sorting it would make two different configurations hash the same.
         for nameserver in dns { lines.append("dns=\(nameserver)") }

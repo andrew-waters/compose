@@ -70,6 +70,46 @@ extension FileParser {
         }
     }
 
+    /// The runtime's own rule for a network name, `^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$`
+    /// (`NetworkResource.nameValid`, the same from container 1.4.1 to 1.6.1). It is stricter than the volume rule:
+    /// lowercase only, at most 63 characters, and a letter or digit at both ends.
+    func validateNetworkName(_ name: String, node: Node) throws {
+        let alphanumeric = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
+        let allowed = alphanumeric.union(CharacterSet(charactersIn: "._-"))
+        let scalars = name.unicodeScalars
+        guard let first = scalars.first, let last = scalars.last,
+              alphanumeric.contains(first), alphanumeric.contains(last),
+              scalars.count <= 63, scalars.allSatisfy(allowed.contains)
+        else {
+            throw ParseError(
+                reason: .wrongShape,
+                problem: "`\(name)` is not a usable network name; use at most 63 lowercase letters, digits, "
+                    + "dots, dashes and underscores, starting and ending with a letter or a digit",
+                mark: mark(node)
+            )
+        }
+    }
+
+    /// The part of the runtime's network rule a key has to keep when it becomes the end of
+    /// `<project>_<key>`: lowercase letters, digits, dots, dashes and underscores, ending with a
+    /// letter or a digit. Its first character follows the `_`, so it may be any of them. The
+    /// length depends on the project name, which is not known here, and is left to the runtime.
+    func validateNetworkKey(_ key: String, node: Node) throws {
+        let alphanumeric = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
+        let allowed = alphanumeric.union(CharacterSet(charactersIn: "._-"))
+        guard let last = key.unicodeScalars.last, alphanumeric.contains(last),
+              key.unicodeScalars.allSatisfy(allowed.contains)
+        else {
+            throw ParseError(
+                reason: .wrongShape,
+                problem: "network `\(key)` would be created as `<project>_\(key)`, which is not a usable "
+                    + "network name; use lowercase letters, digits, dots, dashes and underscores, ending with "
+                    + "a letter or a digit, or give it a `name:`",
+                mark: mark(node)
+            )
+        }
+    }
+
     /// `os/arch` or `os/arch/variant`, lowercased, which is what the runtime matches an
     /// image's platforms against. Anything else is refused here rather than at create time,
     /// where the error would name the image instead of the line.

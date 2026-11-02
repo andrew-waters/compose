@@ -151,7 +151,7 @@ struct FileParser {
         }
 
         try validateReferences(in: file, serviceNodes: serviceNodes)
-        resolveVolumeHostNames(in: &file)
+        resolveHostNames(in: &file)
         return file
     }
 
@@ -216,14 +216,21 @@ struct FileParser {
         }
     }
 
-    /// Stamp each named mount with its volume's own host name, where it has one. See
-    /// `Service.Mount.hostName`.
-    private func resolveVolumeHostNames(in file: inout ComposeFile) {
+    /// Stamp each named mount and each network a service joins with the volume's or network's
+    /// own host name, where it has one. See `Service.Mount.hostName` and
+    /// `Service.networkHostNames`.
+    private func resolveHostNames(in file: inout ComposeFile) {
         for name in file.services.keys {
             guard var service = file.services[name] else { continue }
             for index in service.mounts.indices {
                 guard case .named(let key) = service.mounts[index].source, let spec = file.volumes[key] else { continue }
                 service.mounts[index].hostName = spec.name ?? (spec.isExternal ? key : nil)
+            }
+            // Only the network the service joins: the first it lists, or `default` when it
+            // lists none. The rest are noted as unused, so renaming one changes no container.
+            let networkKey = service.networks.first ?? "default"
+            if let spec = file.networks[networkKey] {
+                service.networkHostNames[networkKey] = spec.name ?? (spec.isExternal ? networkKey : nil)
             }
             file.services[name] = service
         }
@@ -239,12 +246,16 @@ struct FileParser {
             }
             try validateName(key, kind: "network", node: keyNode)
             var spec = NetworkSpec(key: key)
+            // Where the network's host name was written, for the error if it is not one.
+            var nameNode = keyNode
             if valueNode.null == nil {
                 for (fieldNode, fieldValue) in try mapping(valueNode, path: "networks.\(key)") {
                     let field = fieldNode.scalar?.string ?? ""
                     switch field {
                     case "name":
-                        spec.name = try string(fieldValue, path: "networks.\(key).name")
+                        let name = try string(fieldValue, path: "networks.\(key).name")
+                        try assignName(name, to: &spec.name, kind: "network", key: key, node: fieldValue, path: "networks.\(key).name")
+                        nameNode = fieldValue
                     case "driver":
                         spec.driver = try string(fieldValue, path: "networks.\(key).driver")
                         note(
@@ -256,7 +267,7 @@ struct FileParser {
                             )
                         )
                     case "external":
-                        spec.isExternal = fieldValue.bool ?? false
+                        spec.isExternal = try parseExternal(fieldValue, kind: "network", key: key, name: &spec.name, nameNode: &nameNode)
                     case "labels":
                         spec.labels = try parseLabels(fieldValue, service: nil, path: "networks.\(key).labels")
                     case "ipam":
@@ -274,6 +285,14 @@ struct FileParser {
                         )
                     }
                 }
+            }
+            // A name the network keeps as it is has to be one the runtime takes, and so does
+            // the key that ends `<project>_<key>`: the project name is lowercased already, but
+            // the key is the file's own, and `Backend` would fail part way through `up`.
+            if let hostName = spec.name ?? (spec.isExternal ? key : nil) {
+                try validateNetworkName(hostName, node: nameNode)
+            } else {
+                try validateNetworkKey(key, node: keyNode)
             }
             networks[key] = spec
         }
@@ -296,15 +315,7 @@ struct FileParser {
                     switch field {
                     case "name":
                         let name = try string(fieldValue, path: "volumes.\(key).name")
-                        if let earlier = spec.name, earlier != name {
-                            throw ParseError(
-                                reason: .invalidValue,
-                                problem: "volume `\(key)` is named both `\(earlier)` and `\(name)`",
-                                mark: mark(fieldValue),
-                                path: "volumes.\(key).name"
-                            )
-                        }
-                        spec.name = name
+                        try assignName(name, to: &spec.name, kind: "volume", key: key, node: fieldValue, path: "volumes.\(key).name")
                         nameNode = fieldValue
                     case "driver":
                         let driver = try string(fieldValue, path: "volumes.\(key).driver")
@@ -320,44 +331,7 @@ struct FileParser {
                             )
                         }
                     case "external":
-                        if let external = fieldValue.bool {
-                            spec.isExternal = external
-                        } else if fieldValue.mapping != nil {
-                            // The old `external: {name: x}` form, which compose still reads as
-                            // an external volume called `x`. Taking it as false would create an
-                            // empty volume in place of the one meant.
-                            spec.isExternal = true
-                            for (externalKey, externalValue) in try mapping(fieldValue, path: "volumes.\(key).external") {
-                                let externalField = externalKey.scalar?.string ?? ""
-                                guard externalField == "name" else {
-                                    if KeySupportTable.isExtensionKey(externalField) { continue }
-                                    note(
-                                        key: "volumes.\(key).external.\(externalField)",
-                                        node: externalValue,
-                                        support: .unsupported(severity: .cosmetic, reason: "the old `external` form takes only `name`")
-                                    )
-                                    continue
-                                }
-                                let name = try string(externalValue, path: "volumes.\(key).external.name")
-                                if let earlier = spec.name, earlier != name {
-                                    throw ParseError(
-                                        reason: .invalidValue,
-                                        problem: "volume `\(key)` is named both `\(earlier)` and `\(name)`",
-                                        mark: mark(externalValue),
-                                        path: "volumes.\(key).external.name"
-                                    )
-                                }
-                                spec.name = name
-                                nameNode = externalValue
-                            }
-                        } else {
-                            throw ParseError(
-                                reason: .wrongShape,
-                                problem: "`external` is true or false",
-                                mark: mark(fieldValue),
-                                path: "volumes.\(key).external"
-                            )
-                        }
+                        spec.isExternal = try parseExternal(fieldValue, kind: "volume", key: key, name: &spec.name, nameNode: &nameNode)
                     case "labels":
                         spec.labels = try parseLabels(fieldValue, service: nil, path: "volumes.\(key).labels")
                     default:
@@ -379,5 +353,60 @@ struct FileParser {
             volumes[key] = spec
         }
         return volumes
+    }
+
+    /// `external`, for a network or a volume, in either of the forms compose reads: a boolean,
+    /// or the old `external: {name: x}`, which means external and names the resource `x`.
+    /// Taking the old form as false would create a new, empty resource in place of the one
+    /// meant, so anything that is neither form is refused rather than read as false.
+    private mutating func parseExternal(
+        _ node: Node,
+        kind: String,
+        key: String,
+        name: inout String?,
+        nameNode: inout Node
+    ) throws -> Bool {
+        let path = "\(kind)s.\(key).external"
+        if let external = node.bool { return external }
+        guard node.mapping != nil else {
+            throw ParseError(reason: .wrongShape, problem: "`external` is true or false", mark: mark(node), path: path)
+        }
+        for (externalKey, externalValue) in try mapping(node, path: path) {
+            let externalField = externalKey.scalar?.string ?? ""
+            guard externalField == "name" else {
+                if KeySupportTable.isExtensionKey(externalField) { continue }
+                note(
+                    key: "\(path).\(externalField)",
+                    node: externalValue,
+                    support: .unsupported(severity: .cosmetic, reason: "the old `external` form takes only `name`")
+                )
+                continue
+            }
+            let externalName = try string(externalValue, path: "\(path).name")
+            try assignName(externalName, to: &name, kind: kind, key: key, node: externalValue, path: "\(path).name")
+            nameNode = externalValue
+        }
+        return true
+    }
+
+    /// A network or volume can be named twice, by `name:` and by the old `external` form.
+    /// The same name twice is harmless; two different ones leave no way to tell which was meant.
+    private func assignName(
+        _ name: String,
+        to existing: inout String?,
+        kind: String,
+        key: String,
+        node: Node,
+        path: String
+    ) throws {
+        if let earlier = existing, earlier != name {
+            throw ParseError(
+                reason: .invalidValue,
+                problem: "\(kind) `\(key)` is named both `\(earlier)` and `\(name)`",
+                mark: mark(node),
+                path: path
+            )
+        }
+        existing = name
     }
 }

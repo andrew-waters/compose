@@ -535,7 +535,9 @@ public enum Planner {
         project: ProjectIdentity
     ) -> NetworkAssignment? {
         guard let service = file.services[service] else { return nil }
-        guard let key = service.networks.first, let spec = file.networks[key] else {
+        // A service that lists no network is on `default`, which the file may declare to
+        // rename it or make it external; one it does not declare is the project's own.
+        guard let spec = file.networks[service.networks.first ?? "default"] else {
             return NetworkAssignment(name: project.defaultNetworkName, isExternal: false)
         }
         return NetworkAssignment(

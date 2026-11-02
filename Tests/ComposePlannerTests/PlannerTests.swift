@@ -599,6 +599,105 @@ struct DownTests {
         let plan = try Planner.down(file: file, project: Sample.project, state: state)
         #expect(plan.operations.map(\.summary) == ["stop shop-web", "remove shop-web"])
     }
+
+    static let legacyExternal = """
+        services:
+          web:
+            image: nginx
+            networks: [shared]
+        networks:
+          shared:
+            external:
+              name: team-net
+        """
+
+    /// The same network as `legacyExternal`, but as the implicit `default`, which a service that
+    /// lists no network is on. Overriding it is the commonest use of the old form.
+    static let legacyExternalDefault = """
+        services:
+          web:
+            image: nginx
+        networks:
+          default:
+            external:
+              name: team-net
+        """
+
+    @Test("A network in the old `external: {name: x}` form is joined as `x` and never created", arguments: [
+        DownTests.legacyExternal, DownTests.legacyExternalDefault,
+    ])
+    func legacyExternalNetworkJoined(yaml: String) throws {
+        let file = try Sample.file(yaml)
+        let web = try #require(file.services["web"])
+        let state = CurrentState(networks: [NetworkState(name: "team-net")], images: ["nginx"])
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(plan.operations == [
+            .createContainer(
+                CreateOperation(
+                    service: "web",
+                    containerName: "shop-web",
+                    imageReference: "nginx",
+                    environment: [],
+                    command: [],
+                    workingDirectory: nil,
+                    mounts: [],
+                    ports: [],
+                    networkName: "team-net",
+                    labels: Sample.project.labels(for: web),
+                    cpus: nil,
+                    memoryBytes: nil
+                )
+            ),
+            .startContainer(ContainerReference(containerName: "shop-web", service: "web")),
+        ])
+        #expect(Planner.networkNames(in: file, project: Sample.project) == ["web": "team-net"])
+    }
+
+    @Test("A network in the old `external` form that does not exist stops the plan", arguments: [
+        DownTests.legacyExternal, DownTests.legacyExternalDefault,
+    ])
+    func legacyExternalNetworkMissing(yaml: String) throws {
+        let file = try Sample.file(yaml)
+        let error = #expect(throws: PlanError.self) {
+            try Planner.up(file: file, project: Sample.project, state: CurrentState(images: ["nginx"]))
+        }
+        #expect(error == .missingExternalNetwork(name: "team-net", service: "web"))
+    }
+
+    @Test("Renaming a network in the file, or making it external, recreates the service on it")
+    func renamedNetworkRecreates() throws {
+        let before = try Sample.file(Self.legacyExternal)
+        let after = try Sample.file(Self.legacyExternal.replacingOccurrences(of: "team-net", with: "team-net-2"))
+        let state = CurrentState(
+            containers: [try Sample.container(service: "web", in: before, networkName: "team-net")],
+            networks: [NetworkState(name: "team-net"), NetworkState(name: "team-net-2")],
+            images: ["nginx"]
+        )
+        let plan = try Planner.up(file: after, project: Sample.project, state: state)
+        #expect(plan.decisions.map(\.action) == [.recreate])
+        #expect(plan.createOperations.map(\.networkName) == ["team-net-2"])
+
+        // The implicit `default` made external changes the hash too, though the service lists
+        // no network at all.
+        let plainDefault = try Sample.file("services:\n  web:\n    image: nginx\n")
+        let externalDefault = try Sample.file(Self.legacyExternalDefault)
+        #expect(
+            ProjectIdentity.hash(of: try #require(plainDefault.services["web"]))
+                != ProjectIdentity.hash(of: try #require(externalDefault.services["web"]))
+        )
+
+        // A project network that becomes external changes the hash the same way.
+        let projectNetwork = try Sample.file(
+            "services:\n  web:\n    image: nginx\n    networks: [shared]\nnetworks:\n  shared: {}\n"
+        )
+        let external = try Sample.file(
+            "services:\n  web:\n    image: nginx\n    networks: [shared]\nnetworks:\n  shared:\n    external: true\n"
+        )
+        #expect(
+            ProjectIdentity.hash(of: try #require(projectNetwork.services["web"]))
+                != ProjectIdentity.hash(of: try #require(external.services["web"]))
+        )
+    }
 }
 
 @Suite("Project identity")
@@ -890,6 +989,17 @@ struct HookPlanningTests {
         let amd64 = Service(name: "web", image: "nginx", platform: "linux/amd64")
         #expect(amd64.canonicalDescription == "service=web\nimage=nginx\nplatform=linux/amd64")
         #expect(ProjectIdentity.hash(of: amd64) != ProjectIdentity.hash(of: plain))
+    }
+
+    @Test("A network named after the project hashes as its key alone; one with its own name hashes that")
+    func networksInTheHash() throws {
+        // Pinned, so a container on a project network is not recreated by the upgrade.
+        let plain = Service(name: "web", image: "nginx", networks: ["backend"])
+        #expect(plain.canonicalDescription == "service=web\nimage=nginx\nnetwork=backend")
+        let named = Service(name: "web", image: "nginx", networks: ["backend"], networkHostNames: ["backend": "team-net"])
+        #expect(named.canonicalDescription == "service=web\nimage=nginx\nnetwork=backend[team-net]")
+        let onDefault = Service(name: "web", image: "nginx", networkHostNames: ["default": "team-net"])
+        #expect(onDefault.canonicalDescription == "service=web\nimage=nginx\nnetwork=default[team-net]")
     }
 
     @Test("Editing a hook changes the hash; a service with none hashes as it always did")
