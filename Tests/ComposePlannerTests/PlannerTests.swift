@@ -365,8 +365,8 @@ struct CreateOperationTests {
         let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState())
         let create = try #require(plan.createOperations.first)
         #expect(create.mounts == [
-            CreateOperation.Mount(hostPath: "/project/data", containerPath: "/var/lib/postgresql/data", readOnly: false),
-            CreateOperation.Mount(hostPath: "/project/seed", containerPath: "/seed", readOnly: true),
+            CreateOperation.Mount(source: .bind("/project/data"), containerPath: "/var/lib/postgresql/data", readOnly: false),
+            CreateOperation.Mount(source: .bind("/project/seed"), containerPath: "/seed", readOnly: true),
         ])
         #expect(create.workingDirectory == "/srv")
         #expect(create.cpus == 0.5)
@@ -908,5 +908,333 @@ struct HookPlanningTests {
         let asPostStart = Service(name: "web", image: "nginx", postStart: [Service.Hook(command: ["./x.sh"])])
         let asPreStop = Service(name: "web", image: "nginx", preStop: [Service.Hook(command: ["./x.sh"])])
         #expect(ProjectIdentity.hash(of: asPostStart) != ProjectIdentity.hash(of: asPreStop))
+    }
+}
+
+@Suite("Volumes")
+struct VolumePlanningTests {
+    /// `db` keeps its data on a named volume and its scratch space on an anonymous one.
+    static let database = """
+        services:
+          db:
+            image: postgres:16
+            volumes:
+              - pgdata:/var/lib/postgresql/data
+              - /var/lib/data
+        volumes:
+          pgdata:
+            labels:
+              tier: gold
+              com.compose.project: someone-else
+        """
+
+    /// SHA-256 of `/var/lib/data`, first twelve hex digits. Written out rather than worked out,
+    /// so a change to how the name is derived fails here rather than orphaning volumes.
+    static let anonymous = "shop_db_94388feac72b"
+
+    static let images = ["postgres:16"]
+
+    @Test("From nothing: network, then volumes with their labels, then the container that mounts them")
+    func fromNothing() throws {
+        let file = try Sample.file(Self.database)
+        let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState(images: Self.images))
+
+        #expect(Array(plan.operations.prefix(3)) == [
+            .createNetwork(NetworkOperation(name: "shop_default", labels: Sample.project.networkLabels())),
+            .createVolume(
+                VolumeOperation(
+                    name: "shop_pgdata",
+                    // The project's labels win over the file's, so `down -v` still finds it.
+                    labels: ["tier": "gold", "com.compose.project": "shop", "com.compose.volume": "pgdata"]
+                )
+            ),
+            .createVolume(
+                VolumeOperation(
+                    name: Self.anonymous,
+                    labels: [
+                        "com.apple.container.resource.anonymous": "",
+                        "com.compose.project": "shop",
+                        "com.compose.service": "db",
+                        "com.compose.volume.target": "/var/lib/data",
+                    ]
+                )
+            ),
+        ])
+        #expect(plan.operations.map(\.summary).dropFirst(3) == ["create container shop-db", "start shop-db"])
+        let create = try #require(plan.createOperations.first)
+        #expect(create.mounts == [
+            CreateOperation.Mount(
+                source: .namedVolume("shop_pgdata"),
+                containerPath: "/var/lib/postgresql/data",
+                readOnly: false
+            ),
+            CreateOperation.Mount(source: .anonymousVolume(Self.anonymous), containerPath: "/var/lib/data", readOnly: false),
+        ])
+    }
+
+    @Test("A recreate keeps both volumes: neither is created again, and the new container mounts the same ones")
+    func recreateReusesVolumes() throws {
+        let file = try Sample.file(Self.database)
+        let state = CurrentState(
+            // The old container holds both volumes, which is no clash: it goes before the new one
+            // is created.
+            containers: [
+                try Sample.container(service: "db", in: file, hash: "stale", volumes: ["shop_pgdata", Self.anonymous]),
+            ],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            images: Self.images,
+            volumes: [VolumeState(name: "shop_pgdata"), VolumeState(name: Self.anonymous)]
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(plan.operations.map(\.summary) == [
+            "stop shop-db",
+            "remove shop-db",
+            "create container shop-db",
+            "start shop-db",
+        ])
+        #expect(plan.createOperations.first?.mounts.map(\.source) == [
+            .namedVolume("shop_pgdata"),
+            .anonymousVolume(Self.anonymous),
+        ])
+    }
+
+    @Test("A declared volume is created even when no container is, and an anonymous one only when one is")
+    func declaredVolumeWithoutCreate() throws {
+        let file = try Sample.file(Self.database)
+        let state = CurrentState(
+            containers: [try Sample.container(service: "db", in: file)],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            images: Self.images
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(plan.operations == [
+            .createVolume(
+                VolumeOperation(
+                    name: "shop_pgdata",
+                    labels: ["tier": "gold", "com.compose.project": "shop", "com.compose.volume": "pgdata"]
+                )
+            ),
+        ])
+    }
+
+    @Test("`name:` replaces the project prefix, and declared volumes are created in name order")
+    func explicitName() throws {
+        let file = try Sample.file(
+            """
+            services:
+              app:
+                image: app:1
+                volumes:
+                  - zeta:/z
+                  - alpha:/a
+            volumes:
+              zeta:
+                name: archive
+              alpha:
+            """
+        )
+        let plan = try Planner.up(file: file, project: Sample.project, state: CurrentState(images: ["app:1"]))
+        let volumes = plan.operations.compactMap { operation -> VolumeOperation? in
+            guard case .createVolume(let volume) = operation else { return nil }
+            return volume
+        }
+        #expect(volumes == [
+            VolumeOperation(name: "archive", labels: ["com.compose.project": "shop", "com.compose.volume": "zeta"]),
+            VolumeOperation(name: "shop_alpha", labels: ["com.compose.project": "shop", "com.compose.volume": "alpha"]),
+        ])
+        #expect(plan.createOperations.first?.mounts.map(\.source) == [.namedVolume("archive"), .namedVolume("shop_alpha")])
+    }
+
+    static let external = """
+        services:
+          app:
+            image: app:1
+            volumes:
+              - shared:/shared:ro
+        volumes:
+          shared:
+            name: team-data
+            external: true
+        """
+
+    @Test("An external volume that exists is mounted and never created")
+    func externalPresent() throws {
+        let file = try Sample.file(Self.external)
+        let state = CurrentState(images: ["app:1"], volumes: [VolumeState(name: "team-data")])
+        let plan = try Planner.up(file: file, project: Sample.project, state: state)
+        #expect(!plan.operations.contains { if case .createVolume = $0 { return true } else { return false } })
+        #expect(plan.createOperations.first?.mounts == [
+            CreateOperation.Mount(source: .namedVolume("team-data"), containerPath: "/shared", readOnly: true),
+        ])
+    }
+
+    @Test("An external volume that does not exist stops the plan before anything is done")
+    func externalMissing() throws {
+        let file = try Sample.file(Self.external)
+        let error = #expect(throws: PlanError.self) {
+            try Planner.up(file: file, project: Sample.project, state: CurrentState(images: ["app:1"]))
+        }
+        #expect(error == .missingExternalVolume(name: "team-data", service: "app"))
+    }
+
+    @Test("A volume mounted twice in the file is refused, read-only or not")
+    func sharedVolume() throws {
+        let twoServices = try Sample.file(
+            """
+            services:
+              web:
+                image: nginx
+                volumes: ["assets:/usr/share/nginx/html:ro"]
+              build:
+                image: builder:1
+                volumes: ["assets:/out"]
+            volumes:
+              assets:
+            """
+        )
+        let across = #expect(throws: PlanError.self) {
+            try Planner.up(file: twoServices, project: Sample.project, state: CurrentState())
+        }
+        #expect(across == .sharedVolume(name: "shop_assets", services: ["build", "web"]))
+
+        let oneService = try Sample.file(
+            """
+            services:
+              web:
+                image: nginx
+                volumes: ["assets:/a", "assets:/b:ro"]
+            volumes:
+              assets:
+            """
+        )
+        let within = #expect(throws: PlanError.self) {
+            try Planner.up(file: oneService, project: Sample.project, state: CurrentState())
+        }
+        #expect(within == .sharedVolume(name: "shop_assets", services: ["web"]))
+    }
+
+    @Test("A volume a running container outside the service holds is refused; a stopped one is not")
+    func volumeHeldElsewhere() throws {
+        let file = try Sample.file(Self.external)
+        let holder = ContainerState(name: "someone", isRunning: true, volumes: ["team-data"])
+        let state = CurrentState(images: ["app:1"], volumes: [VolumeState(name: "team-data")])
+        let error = #expect(throws: PlanError.self) {
+            try Planner.up(
+                file: file,
+                project: Sample.project,
+                state: CurrentState(containers: [holder], images: state.images, volumes: state.volumes)
+            )
+        }
+        #expect(error == .volumeInUse(name: "team-data", service: "app", heldBy: "container `someone`"))
+
+        let stopped = ContainerState(name: "someone", isRunning: false, volumes: ["team-data"])
+        let plan = try Planner.up(
+            file: file,
+            project: Sample.project,
+            state: CurrentState(containers: [stopped], images: state.images, volumes: state.volumes)
+        )
+        #expect(plan.createOperations.count == 1)
+    }
+
+    @Test("down leaves every volume alone unless asked")
+    func downKeepsVolumes() throws {
+        let file = try Sample.file(Self.database)
+        let state = CurrentState(
+            containers: [try Sample.container(service: "db", in: file)],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            volumes: [VolumeState(name: "shop_pgdata", labels: ["com.compose.project": "shop"])]
+        )
+        let plan = try Planner.down(file: file, project: Sample.project, state: state)
+        #expect(plan.operations.map(\.summary) == ["stop shop-db", "remove shop-db", "remove network shop_default"])
+    }
+
+    @Test("down with removeVolumes removes only this project's volumes, by name, after the networks")
+    func downRemovesProjectVolumes() throws {
+        let file = try Sample.file(Self.database)
+        let anonymousLabels = Sample.project.anonymousVolumeLabels(service: "db", target: "/var/lib/data")
+        let state = CurrentState(
+            containers: [try Sample.container(service: "db", in: file)],
+            networks: [NetworkState(name: "shop_default", labels: Sample.project.networkLabels())],
+            volumes: [
+                VolumeState(name: "shop_pgdata", labels: ["com.compose.project": "shop", "com.compose.volume": "pgdata"]),
+                VolumeState(name: Self.anonymous, labels: anonymousLabels),
+                // External, or there before the project: no label, so never removed.
+                VolumeState(name: "team-data"),
+                VolumeState(name: "other_data", labels: ["com.compose.project": "other"]),
+            ]
+        )
+        let plan = try Planner.down(
+            file: file,
+            project: Sample.project,
+            state: state,
+            options: DownOptions(removeVolumes: true)
+        )
+        #expect(plan.operations == [
+            .stopContainer(ContainerReference(containerName: "shop-db", service: "db")),
+            .removeContainer(ContainerReference(containerName: "shop-db", service: "db")),
+            .removeNetwork(NetworkOperation(name: "shop_default", labels: Sample.project.networkLabels())),
+            .removeVolume(VolumeOperation(name: Self.anonymous, labels: anonymousLabels)),
+            .removeVolume(
+                VolumeOperation(name: "shop_pgdata", labels: ["com.compose.project": "shop", "com.compose.volume": "pgdata"])
+            ),
+        ])
+    }
+
+    @Test("down -v leaves a volume a container outside the project still mounts")
+    func downSkipsVolumeInUse() throws {
+        let file = try Sample.file(Self.database)
+        let labels = ["com.compose.project": "shop", "com.compose.volume": "pgdata"]
+        let state = CurrentState(
+            containers: [
+                try Sample.container(service: "db", in: file, volumes: ["shop_pgdata"]),
+                // Stopped, and still enough for the runtime to refuse the delete.
+                ContainerState(name: "a-guest", volumes: ["shop_pgdata"]),
+            ],
+            volumes: [VolumeState(name: "shop_pgdata", labels: labels)]
+        )
+        let plan = try Planner.down(
+            file: file,
+            project: Sample.project,
+            state: state,
+            options: DownOptions(removeNetworks: false, removeVolumes: true)
+        )
+        #expect(plan.operations.map(\.summary) == ["stop shop-db", "remove shop-db"])
+    }
+
+    @Test("A service without volumes hashes as it always did; one with them hashes their mounts")
+    func volumesInTheHash() throws {
+        #expect(Service(name: "db", image: "postgres:16").canonicalDescription == "service=db\nimage=postgres:16")
+        let mounted = Service(
+            name: "db",
+            image: "postgres:16",
+            mounts: [
+                Service.Mount(source: .named("pgdata"), target: "/data"),
+                Service.Mount(source: .anonymous, target: "/scratch"),
+            ]
+        )
+        #expect(mounted.canonicalDescription == "service=db\nimage=postgres:16\nmount=:/scratch\nmount=pgdata:/data")
+
+        // A volume with a name of its own hashes that name, so renaming it recreates the
+        // container onto the new volume.
+        let renamed = Service(
+            name: "db",
+            image: "postgres:16",
+            mounts: [Service.Mount(source: .named("pgdata"), target: "/data", hostName: "team-data")]
+        )
+        #expect(renamed.canonicalDescription == "service=db\nimage=postgres:16\nmount=pgdata[team-data]:/data")
+    }
+
+    @Test("Renaming a volume in the file recreates the service that mounts it")
+    func renamedVolumeRecreates() throws {
+        let before = try Sample.file(Self.external)
+        let after = try Sample.file(Self.external.replacingOccurrences(of: "team-data", with: "team-data-2"))
+        let state = CurrentState(
+            containers: [try Sample.container(service: "app", in: before, volumes: ["team-data"])],
+            images: ["app:1"],
+            volumes: [VolumeState(name: "team-data"), VolumeState(name: "team-data-2")]
+        )
+        let plan = try Planner.up(file: after, project: Sample.project, state: state)
+        #expect(plan.decisions.map(\.action) == [.recreate])
+        #expect(plan.createOperations.first?.mounts.map(\.source) == [.namedVolume("team-data-2")])
     }
 }

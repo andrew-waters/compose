@@ -1,8 +1,8 @@
 /// One entry under the top-level `volumes:`.
 ///
-/// Named volumes are deferred for v1: they are parsed, reported and carried in the model, and
-/// nothing creates or removes them. The type exists now so that the shape of the file is not
-/// lost, and so the deferral is visible rather than implied by a missing type.
+/// A service mounting a volume names the key, not the volume. `up` creates the volume when it
+/// is missing, labelled with the project, unless it is external; only `down -v` removes it, and
+/// only when it carries the project label.
 public struct VolumeSpec: Sendable, Hashable, Identifiable {
     public var id: String { key }
 
@@ -10,8 +10,11 @@ public struct VolumeSpec: Sendable, Hashable, Identifiable {
     public var key: String
     /// An explicit `name:`, which turns off project-name prefixing.
     public var name: String?
+    /// Carried for the record. The runtime has one driver, `local`, and the parser notes any
+    /// other.
     public var driver: String?
-    /// `external: true`, meaning the volume is managed outside this project.
+    /// `external: true`, meaning the volume must already exist and is never created or removed
+    /// here.
     public var isExternal: Bool
     public var labels: [String: String]
 

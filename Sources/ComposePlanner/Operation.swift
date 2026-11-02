@@ -7,6 +7,8 @@ import ComposeModel
 public enum Operation: Sendable, Equatable {
     case createNetwork(NetworkOperation)
     case removeNetwork(NetworkOperation)
+    case createVolume(VolumeOperation)
+    case removeVolume(VolumeOperation)
     case buildImage(BuildOperation)
     case pullImage(PullOperation)
     case createContainer(CreateOperation)
@@ -18,7 +20,7 @@ public enum Operation: Sendable, Equatable {
     /// The service this operation is part of, for per-service progress.
     public var service: String? {
         switch self {
-        case .createNetwork, .removeNetwork:
+        case .createNetwork, .removeNetwork, .createVolume, .removeVolume:
             return nil
         case .buildImage(let operation):
             return operation.service
@@ -38,6 +40,8 @@ public enum Operation: Sendable, Equatable {
         switch self {
         case .createNetwork(let operation): return "create network \(operation.name)"
         case .removeNetwork(let operation): return "remove network \(operation.name)"
+        case .createVolume(let operation): return "create volume \(operation.name)"
+        case .removeVolume(let operation): return "remove volume \(operation.name)"
         case .buildImage(let operation): return "build \(operation.imageReference) from \(operation.context)"
         case .pullImage(let operation): return "pull \(operation.imageReference)"
         case .createContainer(let operation): return "create container \(operation.containerName)"
@@ -51,6 +55,17 @@ public enum Operation: Sendable, Equatable {
 }
 
 public struct NetworkOperation: Sendable, Equatable {
+    public let name: String
+    public let labels: [String: String]
+
+    public init(name: String, labels: [String: String] = [:]) {
+        self.name = name
+        self.labels = labels
+    }
+}
+
+/// A volume to create or remove, by the name it has on the host.
+public struct VolumeOperation: Sendable, Equatable {
     public let name: String
     public let labels: [String: String]
 
@@ -112,12 +127,23 @@ public struct PullOperation: Sendable, Equatable {
 /// quietly lost here.
 public struct CreateOperation: Sendable, Equatable {
     public struct Mount: Sendable, Equatable {
-        public let hostPath: String
+        /// What is mounted, with every name already resolved, so whoever runs the operation
+        /// never has to work out a volume's name from the file.
+        public enum Source: Sendable, Equatable {
+            /// An absolute path on the host.
+            case bind(String)
+            /// A volume declared in the file, by the name it has on the host.
+            case namedVolume(String)
+            /// A volume the file asked for by target alone, by the name the planner gave it.
+            case anonymousVolume(String)
+        }
+
+        public let source: Source
         public let containerPath: String
         public let readOnly: Bool
 
-        public init(hostPath: String, containerPath: String, readOnly: Bool) {
-            self.hostPath = hostPath
+        public init(source: Source, containerPath: String, readOnly: Bool) {
+            self.source = source
             self.containerPath = containerPath
             self.readOnly = readOnly
         }

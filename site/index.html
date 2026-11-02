@@ -116,6 +116,12 @@
                 <td><span class="m m--yes">yes</span></td>
               </tr>
               <tr>
+                <th scope="row">Named and anonymous volumes</th>
+                <td><span class="m m--yes">yes</span></td>
+                <td><span class="m m--yes">yes</span> <span class="why">kept across <code>down</code> and recreates;
+                  <code>down -v</code> removes them</span></td>
+              </tr>
+              <tr>
                 <th scope="row"><code>deploy.resources</code></th>
                 <td><span class="m m--yes">yes</span></td>
                 <td><span class="m m--yes">yes</span> <span class="why">a VM cannot have half a core, so cpus round
@@ -164,11 +170,6 @@
                 <td><span class="m m--yes">yes</span></td>
                 <td><span class="m m--soon">not yet</span> <span class="why">a container cannot report health, so
                   probes would have to run here</span></td>
-              </tr>
-              <tr>
-                <th scope="row">Named volumes</th>
-                <td><span class="m m--yes">yes</span></td>
-                <td><span class="m m--soon">not yet</span> <span class="why">bind mounts today</span></td>
               </tr>
               <tr>
                 <th scope="row">Several networks per service</th>

@@ -14,11 +14,20 @@ public struct CurrentState: Sendable, Equatable {
     public let networks: [NetworkState]
     /// Image references already present locally, so the plan knows what still has to be pulled.
     public let images: [String]
+    /// Every volume the runtime knows about, so the plan knows what is already there to mount
+    /// and what `down -v` may remove.
+    public let volumes: [VolumeState]
 
-    public init(containers: [ContainerState] = [], networks: [NetworkState] = [], images: [String] = []) {
+    public init(
+        containers: [ContainerState] = [],
+        networks: [NetworkState] = [],
+        images: [String] = [],
+        volumes: [VolumeState] = []
+    ) {
         self.containers = containers
         self.networks = networks
         self.images = images
+        self.volumes = volumes
     }
 }
 
@@ -29,19 +38,24 @@ public struct ContainerState: Sendable, Equatable {
     /// Host ports this container currently publishes, whoever created it.
     public let publishedHostPorts: [UInt16]
     public let networkName: String?
+    /// Volumes this container mounts, by name, whoever created it. A volume is a disk attached
+    /// to one machine at a time, and the runtime will not delete one any container mounts.
+    public let volumes: [String]
 
     public init(
         name: String,
         labels: [String: String] = [:],
         isRunning: Bool = false,
         publishedHostPorts: [UInt16] = [],
-        networkName: String? = nil
+        networkName: String? = nil,
+        volumes: [String] = []
     ) {
         self.name = name
         self.labels = labels
         self.isRunning = isRunning
         self.publishedHostPorts = publishedHostPorts
         self.networkName = networkName
+        self.volumes = volumes
     }
 
     public var projectName: String? { labels[ProjectIdentity.projectLabel] }
@@ -50,6 +64,18 @@ public struct ContainerState: Sendable, Equatable {
 }
 
 public struct NetworkState: Sendable, Equatable {
+    public let name: String
+    public let labels: [String: String]
+
+    public init(name: String, labels: [String: String] = [:]) {
+        self.name = name
+        self.labels = labels
+    }
+
+    public var projectName: String? { labels[ProjectIdentity.projectLabel] }
+}
+
+public struct VolumeState: Sendable, Equatable {
     public let name: String
     public let labels: [String: String]
 
