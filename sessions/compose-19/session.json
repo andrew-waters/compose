@@ -1,6 +1,7 @@
 {
   "box" : "Andrew’s MacBook Air",
   "branch" : "19-create-and-mount-named-and-anonymous",
+  "finishedAt" : "2026-11-02T08:09:18Z",
   "issue" : "andrew-waters/compose#19",
   "pullRequests" : [
     "https://github.com/andrew-waters/compose/pull/20"
