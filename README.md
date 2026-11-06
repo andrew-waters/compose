@@ -108,7 +108,7 @@ the next `up`.
 `privileged: false` on a hook is accepted, and `privileged: true` is refused: a process run in
 a container has no privileged mode. As everywhere in a compose file, `$VAR` in a hook is
 filled in from your shell when the file is read; write `$$VAR` for the container's own
-variable. Orchard does not run hooks.
+variable. Orchard's Compose tab runs hooks too, with the same rules for what a failure means.
 
 **Not yet:** `entrypoint`, attaching to multiple networks, `profiles`,
 `include`, `healthcheck`, and `depends_on` with conditions. `pull_policy` is read but not
@@ -242,7 +242,11 @@ Three library targets, none of which executes anything:
   forms, and a line and column on every error.
 - `ComposePlanner`, the dependency graph, project identity and hashing, and the planner
   itself, which takes a parsed file and a snapshot of what exists and returns an ordered
-  list of operations.
+  list of operations. It also holds the rules for a hook that fails, so every front end
+  that runs one decides the same way: `HookOperation.outcome(laterSteps:)` says whether the
+  plan carries on (`HookOutcome`), `HookFailure` carries what happened (the exit status or
+  why it could not start, and its last output lines) without wording it, and
+  `HookTranscript(keeping:)` keeps the end of a hook's output.
 
 Plus one executable target, `compose`, which is the plugin: it parses, plans, prints, and
 executes the plan. It is the only target that knows a runtime exists.
