@@ -5,8 +5,8 @@ import Testing
 
 @testable import compose
 
-@Suite("What a failed hook means for the plan")
-struct HookOutcomeTests {
+@Suite("How the plugin words a failed hook")
+struct HookReportTests {
     static func hook(_ phase: HookOperation.Phase) -> HookOperation {
         HookOperation(
             service: "web",
@@ -21,7 +21,7 @@ struct HookOutcomeTests {
     @Test("A pre_stop that exits non-zero is a warning, with its exit code and output")
     func preStopExitCarriesOn() {
         let hook = Self.hook(.preStop)
-        let failure = HookFailure(hook: hook, status: 3, lastLines: ["checking", "config missing"])
+        let failure = HookFailure(hook: hook, reason: .exited(3), lastLines: ["checking", "config missing"])
         #expect(Runtime.outcome(of: hook, failingWith: failure, later: 2) == .carryOn(
             warning: """
                 pre_stop[0] in service `web` exited 3
@@ -49,7 +49,7 @@ struct HookOutcomeTests {
     @Test("A post_start that exits non-zero stops the plan and says how to run it again")
     func postStartExitStops() {
         let hook = Self.hook(.postStart)
-        let failure = HookFailure(hook: hook, status: 1, lastLines: [])
+        let failure = HookFailure(hook: hook, reason: .exited(1), lastLines: [])
         #expect(Runtime.outcome(of: hook, failingWith: failure, later: 2) == .stop(
             message: """
                 post_start[0] in service `web` exited 1
@@ -115,11 +115,11 @@ struct HostnameTests {
 }
 
 @Suite("Relaying hook output")
-struct HookTranscriptTests {
+struct HookRelayTests {
     @Test("Every line is relayed, and only the last twenty are kept for an error")
     func keepsTheEnd() async throws {
         let pipe = Pipe()
-        let transcript = HookTranscript()
+        let transcript = HookRelay()
         let text = (1...25).map { "line \($0)\n" }.joined()
         try pipe.fileHandleForWriting.write(contentsOf: Data(text.utf8))
         try pipe.fileHandleForWriting.close()
@@ -131,7 +131,7 @@ struct HookTranscriptTests {
     @Test("A stream something else holds open does not hold up the hook past the deadline")
     func drainHasADeadline() async throws {
         let pipe = Pipe()
-        let transcript = HookTranscript()
+        let transcript = HookRelay()
         Task { await transcript.relay(pipe.fileHandleForReading) }
         try pipe.fileHandleForWriting.write(contentsOf: Data("before\n".utf8))
 

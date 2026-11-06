@@ -81,8 +81,9 @@ enum Runtime {
         }
     }
 
-    /// What a hook that went wrong means for the rest of the plan.
-    enum HookOutcome: Equatable {
+    /// How a hook that went wrong is reported. Whether the plan goes on is the library's
+    /// decision (`HookOperation.outcome(laterSteps:)`); the words are the plugin's.
+    enum HookReport: Equatable {
         /// Say so and go on to the next step.
         case carryOn(warning: String)
         /// Stop the plan with this message.
@@ -91,23 +92,39 @@ enum Runtime {
 
     /// Whatever went wrong, whether the hook exited non-zero or never got going, the plan
     /// decided up front whether it matters.
-    static func outcome(of hook: HookOperation, failingWith error: any Error, later: Int) -> HookOutcome {
-        let text = (error as? HookFailure)?.description
-            ?? "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` could not run: \(friendly(error))"
-        guard hook.failureIsFatal else {
-            // The container is being stopped either way, so a failed `pre_stop` is worth
-            // saying and not worth leaving the container up for.
+    static func outcome(of hook: HookOperation, failingWith error: any Error, later: Int) -> HookReport {
+        let failure = error as? HookFailure ?? HookFailure(hook: hook, reason: .couldNotStart(error))
+        let text = describe(failure)
+        switch hook.outcome(laterSteps: later) {
+        case .carryOn:
             return .carryOn(warning: text + "\n  carrying on with the stop")
+        case .stop(let laterSteps, let container):
+            return .stop(
+                message: text
+                    + "\n  `\(container)` was left in place"
+                    + (laterSteps > 0 ? "; \(laterSteps) later step(s) were not attempted" : "")
+                    + "\n  `up` keeps a running container, so it will not run this hook again; "
+                    + "run `down` and then `up` once it is fixed"
+            )
         }
-        // The container is kept and its hash has not changed, so another `up` would leave it
-        // alone and the hook would not run again.
-        return .stop(
-            message: text
-                + "\n  `\(hook.containerName)` was left in place"
-                + (later > 0 ? "; \(later) later step(s) were not attempted" : "")
-                + "\n  `up` keeps a running container, so it will not run this hook again; "
-                + "run `down` and then `up` once it is fixed"
-        )
+    }
+
+    /// The failure as the plugin words it: the hook, then its exit status and last output, or
+    /// why it could not run.
+    static func describe(_ failure: HookFailure) -> String {
+        let hook = failure.hook
+        let name = "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)`"
+        switch failure.reason {
+        case .couldNotStart(let error):
+            return "\(name) could not run: \(friendly(error))"
+        case .exited(let status):
+            var text = "\(name) exited \(status)"
+            if !failure.lastLines.isEmpty {
+                text += "\n  its last output was:"
+                for line in failure.lastLines { text += "\n    \(line)" }
+            }
+            return text
+        }
     }
 
     private static func failed(_ operation: ComposePlanner.Operation, _ error: any Error, later: Int) -> any Error {
@@ -192,18 +209,18 @@ enum Runtime {
         try? errors.fileHandleForWriting.close()
         try await process.start()
 
-        let transcript = HookTranscript()
+        let relay = HookRelay()
         for handle in [output.fileHandleForReading, errors.fileHandleForReading] {
-            Task { await transcript.relay(handle) }
+            Task { await relay.relay(handle) }
         }
         let status = try await process.wait()
         // A hook that leaves something running in the background (`daemon &`) leaves it
         // holding the hook's output, so the end of the stream may never come. Give it a
         // moment to drain, as `container exec` does, then stop showing it and move on.
-        await transcript.drain(streams: 2, within: .seconds(3))
+        await relay.drain(streams: 2, within: .seconds(3))
 
         guard status == 0 else {
-            throw HookFailure(hook: operation, status: status, lastLines: transcript.lastLines)
+            throw HookFailure(hook: operation, reason: .exited(status), lastLines: relay.lastLines)
         }
     }
 
@@ -506,44 +523,29 @@ enum Runtime {
     }
 }
 
-/// A hook that ran and exited non-zero. Whether that stops the plan is the plan's decision,
-/// carried on the operation, so this only says what happened.
-struct HookFailure: Error, CustomStringConvertible {
-    let hook: HookOperation
-    let status: Int32
-    let lastLines: [String]
-
-    var description: String {
-        var text = "\(hook.phase.rawValue)[\(hook.index)] in service `\(hook.service)` exited \(status)"
-        if !lastLines.isEmpty {
-            text += "\n  its last output was:"
-            for line in lastLines { text += "\n    \(line)" }
-        }
-        return text
-    }
-}
-
 /// Shows a hook's output line by line as it arrives, and keeps the end of it for the error
 /// if the hook fails. stdout and stderr both land on stdout here, interleaved as they come,
 /// because the order things happened in is the useful part.
-final class HookTranscript: @unchecked Sendable {
-    private static let kept = 20
+///
+/// What is kept is the library's `HookTranscript`; reading the streams, showing each line and
+/// the deadline for a stream something else holds open are the plugin's.
+final class HookRelay: @unchecked Sendable {
+    /// A terminal has room for a good part of a failing hook's output.
+    static let kept = 20
+    private let transcript = HookTranscript(keeping: HookRelay.kept)
     private let lock = NSLock()
-    private var lines: [String] = []
-
-    var lastLines: [String] {
-        lock.withLock { lines }
-    }
-
     private var finished = 0
     private var stopped = false
+
+    var lastLines: [String] {
+        transcript.lastLines
+    }
 
     /// Shows and keeps a line, unless the hook has been moved on from.
     private func show(_ line: String) {
         let shown = lock.withLock { () -> Bool in
             guard !stopped else { return false }
-            lines.append(line)
-            if lines.count > Self.kept { lines.removeFirst(lines.count - Self.kept) }
+            transcript.append(line)
             return true
         }
         if shown { Output.line("        \(line)") }
